@@ -11,13 +11,13 @@ extern void cospan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
     *out_r = in * pan_r;
 }
 
-extern t_sample peek(t_atom_long window_size, t_sample *buf, t_sample index){
+extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
     //index in samples (mit fract)
     int index_trunc = floor(index);
     
     t_sample index_fract = index - index_trunc;
     index_trunc++;
-    t_bool index_ignore = ((index_trunc >= window_size) || (index_trunc<0));
+    t_bool index_ignore = ((index_trunc >= buffer_size) || (index_trunc<0));
     
     t_sample read = (index_ignore)?0:buf[index_trunc];
     t_sample readinterp = cosine_interp(index_fract, read, read);

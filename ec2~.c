@@ -67,9 +67,9 @@ t_sample window(t_ec2 *x, t_atom_long voice_index){
         return 0;
     }
     
-    t_sample tuk        = peek(x->window_size, x->tukey, window_phase);
-    t_sample expo       = peek(x->window_size, x->expodec, window_phase);
-    t_sample rexpo      = peek(x->window_size, x->rexpodec, window_phase);
+    t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
+    t_sample expo       = peek(x->expodec, x->window_size, window_phase);
+    t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
     t_sample env_shape  = x->voices[voice_index].envelope_shape;
     
     t_sample interp = 0;
@@ -86,7 +86,7 @@ t_sample window(t_ec2 *x, t_atom_long voice_index){
 }
 
 t_sample playback(t_ec2 *x, t_atom_long voice_index, t_sample *buf){
-    //crashes
+    //crashes, also playback is very fucked
     t_sample play_phase = x->voices[voice_index].play_phase;
     t_sample scan_begin     = x->voices[voice_index].scan_begin;
     t_sample scan_end       = x->voices[voice_index].scan_end;
@@ -101,7 +101,7 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index, t_sample *buf){
     x->voices[voice_index].play_phase = play_phase;
     t_sample peek_point = fmod(play_phase+scan_begin, scan_end);    //vorher, nachher?
     
-    t_sample sample = peek(x->buffer_size, buf, peek_point);
+    t_sample sample = peek(buf, x->buffer_size, peek_point);
     return sample;
 }
 
