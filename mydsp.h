@@ -54,19 +54,21 @@ extern void calculate_windows(t_ec2 *x){
     }
 }
 
-extern t_sample windowsamp(t_ec2 *x, t_atom_long index){
+extern t_sample windowsamp(t_ec2 *x, t_atom_long voice_index, t_sample index){
+    //index verwechselt?????
+    //index from args needs to be t_sample
     //index in samples (mit fract)
-    t_sample tuk = peek(x, x->tukey, index);
-    t_sample expo = peek(x, x->expodec, index);
-    t_sample rexpo = peek(x, x->rexpodec, index);
+    t_sample tuk    = peek(x->window_size, x->tukey, index);
+    t_sample expo   = peek(x->window_size, x->expodec, index);
+    t_sample rexpo  = peek(x->window_size, x->rexpodec, index);
     t_sample val = 0;
-    t_sample env_shape = x->voices[index].envelope_shape;
+    t_sample env_shape = x->voices[voice_index].envelope_shape;   //index hier ist falsch, pass envshape as param
     
     if(env_shape <0.5){
         val = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
     }else if(env_shape==0.5){
         val = tuk;
-    }else if(env_shape<=1){
+    }else if(env_shape<=1.){
         val = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
     }else{
         val = tuk;

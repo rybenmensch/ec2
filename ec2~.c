@@ -54,18 +54,20 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     return (x);
 }
 
+//merge do_window and windowsamp? bitzeli unnötig dass man die struktur und voice index zweimal weitergeben muss
 //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
 //window determines the "life time" of a single grain!
 t_sample do_window(t_ec2 *x, t_atom_long voice_index){
     t_sample window_phase = x->voices[voice_index].window_phase;
     window_phase += x->voices[voice_index].window_increment;
+    
     if(window_phase>x->voices[voice_index].grain_duration){
         x->voices[voice_index].is_active = FALSE;
         x->active_voices--;
         return 0;
     }
     
-    t_sample val = windowsamp(x, window_phase);
+    t_sample val = windowsamp(x, voice_index, window_phase);
     
     x->voices[voice_index].window_phase = window_phase;
     return val;
