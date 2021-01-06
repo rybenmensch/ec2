@@ -50,7 +50,12 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->scan_count = 0;
     x->init = TRUE;
     x->samplerate = 44100;
-    ec2_set(x, s);
+    
+    x->testcounter = 0;
+    x->buffer = NULL;
+    
+    t_symbol *bufname = atom_getsymarg(0, argc, argv);
+    ec2_set(x, bufname);
     return (x);
 }
 
@@ -86,23 +91,36 @@ t_sample window(t_ec2 *x, t_atom_long voice_index){
 }
 
 t_sample playback(t_ec2 *x, t_atom_long voice_index, t_sample *buf){
+    //buffer access seems to be not working ?
+    //just accesses random garbage vals
+    t_sample play_phase     = x->voices[voice_index].play_phase;
+    t_sample playback_rate  = x->voices[voice_index].playback_rate;
+    
+    play_phase += playback_rate;
+    play_phase = fmod(play_phase, x->buffer_size+1);
+    x->voices[voice_index].play_phase = play_phase;
+    
+    t_sample samp = peek(x->buffer, x->buffer_size, play_phase);
+    return samp;
+    /*
     //crashes, also playback is very fucked
-    t_sample play_phase = x->voices[voice_index].play_phase;
+    t_sample play_phase     = x->voices[voice_index].play_phase;
     t_sample scan_begin     = x->voices[voice_index].scan_begin;
     t_sample scan_end       = x->voices[voice_index].scan_end;
+    t_sample playback_rate  = x->voices[voice_index].playback_rate;
     
-    play_phase += x->voices[voice_index].playback_rate;
+    play_phase += playback_rate;
     //loop between 0 and scan_end, then add the offset for scan_begin when peeking
     //overflow
     play_phase = fmod(play_phase, scan_end+1);  //are we off-by-one? *shrug*
     //underflow
     play_phase = (play_phase<0.)?scan_end:play_phase;
-    
     x->voices[voice_index].play_phase = play_phase;
-    t_sample peek_point = fmod(play_phase+scan_begin, scan_end);    //vorher, nachher?
-    
+    //t_sample peek_point = fmod(play_phase+scan_begin, scan_end);    //vorher, nachher?
+    t_sample peek_point = play_phase;
     t_sample sample = peek(buf, x->buffer_size, peek_point);
     return sample;
+     */
 }
 
 void do_grain(t_ec2 *x, t_atom_long voice_index){
@@ -132,14 +150,31 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     
     t_buffer_obj *bref = buffer_ref_getobject(x->l_buffer_reference);
     if(!bref){
-        x->buffer_size = 1;
+        //x->buffer_size = 1;
+        goto zero;
     }else{
-        x->buffer_size = buffer_getframecount(bref)-1;
+        x->buffer_size      = buffer_getframecount(bref)-1;
+        x->channel_count    = buffer_getchannelcount(bref);
     }
     
+    //access into this array is not working at all..
     t_float *buffersamps = buffer_locksamples(bref);
+    if(!buffersamps){
+        goto zero;
+    }else{
+        if(x->buffer){
+            sysmem_freeptr(x->buffer);
+        }
+        x->buffer = (t_sample *)sysmem_newptr(sampleframes * sizeof(t_sample));
+        
+        for(long i=0;i<sampleframes;i++){
+            x->buffer[i] = (t_sample)(buffersamps[i]);
+        }
+    }
     
     long n=sampleframes;
+    //we'll have to handle amount of channels later
+    //multiply the index by the amount of channels that there are
     
     while(n--){
         //later, use voice_and_param();
@@ -214,7 +249,8 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 x->voices[new_index].window_increment = window_increment;
                 
                 x->voices[new_index].window_phase = 0;
-                x->voices[new_index].play_phase = starting_point;
+                //x->voices[new_index].play_phase = starting_point;
+                x->voices[new_index].play_phase = 0;
             }
         }
         //PLAYBACK
@@ -224,17 +260,34 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
+                t_sample play_phase     = x->voices[i].play_phase;
+                t_sample playback_rate  = x->voices[i].playback_rate;
+                
+                play_phase += playback_rate;
+                play_phase = fmod(play_phase, x->buffer_size+1);
+                x->voices[i].play_phase = play_phase;
+                
+                t_sample samp = peek(x->buffer, x->buffer_size, play_phase);
+                accum += samp;
                 t_sample windowsamp = window(x, i);
+                /*
                 t_sample playbacksamp = playback(x, i, (t_sample *)buffersamps);
                 playbacksamp *= windowsamp;
                 accum += playbacksamp;
+                */
+                /*
                 //make a panning wrapper function
                 t_sample pan_l, pan_r;
                 cospan(playbacksamp, x->voices[i].pan, &pan_l, &pan_r);
                 accum_l += pan_l;
                 accum_r += pan_r;
+                 */
             }
         }
+        
+        x->testcounter = (x->testcounter++)%x->buffer_size+1;
+        //buffer playback is working as shown when line below is uncommented
+        accum = x->buffer[x->testcounter];
         
         //*out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
         *out_l++ = FIX_DENORM_NAN_SAMPLE(accum);
@@ -249,11 +302,21 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         }
     }
     buffer_unlocksamples(bref);
+    
+    
+    
+    
+    return;
+zero:
+    for(int i=0;i<numouts;i++){
+        set_zero64(outs[i], sampleframes);
+    }
 }
 
 /***HOUSEKEEPING***/
 
 void ec2_free(t_ec2 *x){
+    dsp_free((t_pxobject *)x);
     object_free(x->l_buffer_reference);
     if(x->tukey){
         sysmem_freeptr(x->tukey);
@@ -267,6 +330,10 @@ void ec2_free(t_ec2 *x){
     
     if(x->voices){
         sysmem_freeptr(x->voices);
+    }
+    
+    if(x->buffer){
+        sysmem_freeptr(x->buffer);
     }
 }
 

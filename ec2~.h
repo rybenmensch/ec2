@@ -30,6 +30,7 @@ typedef struct _ec2 {
     t_float samplerate;
     t_buffer_ref *l_buffer_reference;
     t_atom_long buffer_size;
+    t_atom_long channel_count;
     t_sample *tukey;
     t_sample *expodec;
     t_sample *rexpodec;
@@ -41,6 +42,9 @@ typedef struct _ec2 {
     t_sample scan_count;
     t_sample scan_begin;
     t_sample scan_end;
+    
+    t_atom_long testcounter;
+    t_sample *buffer;
     
     short count[9];
 } t_ec2;
