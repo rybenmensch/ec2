@@ -53,7 +53,7 @@ extern void calculate_windows(t_ec2 *x){
         x->rexpodec[i] = val;
     }
 }
-
+/*
 extern t_sample windowsamp(t_ec2 *x, t_atom_long voice_index, t_sample index){
     t_sample tuk    = peek(x->window_size, x->tukey, index);
     t_sample expo   = peek(x->window_size, x->expodec, index);
@@ -72,6 +72,6 @@ extern t_sample windowsamp(t_ec2 *x, t_atom_long voice_index, t_sample index){
     }
     return val;
 }
-
+*/
 
 #endif /* mydsp_h */
