@@ -54,13 +54,13 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     return (x);
 }
 
-//side effects: increases window_phase, changes is_active (when done), active_voices is decreased
-//window determines the "life time" of a single grain!
-t_sample do_window_alt(t_ec2 *x, t_atom_long voice_index){
+t_sample window(t_ec2 *x, t_atom_long voice_index){
+    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
+    //window determines the "life time" of a single grain!
     t_sample window_phase = x->voices[voice_index].window_phase;
     window_phase += x->voices[voice_index].window_increment;
-
     x->voices[voice_index].window_phase = window_phase;
+    
     if(window_phase>=x->window_size){
         x->voices[voice_index].is_active = FALSE;
         x->active_voices--;
@@ -72,92 +72,39 @@ t_sample do_window_alt(t_ec2 *x, t_atom_long voice_index){
     t_sample rexpo      = peek(x->window_size, x->rexpodec, window_phase);
     t_sample env_shape  = x->voices[voice_index].envelope_shape;
     
-    t_sample val = 0;
+    t_sample interp = 0;
     if(env_shape <0.5){
-        val = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
+        interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
     }else if(env_shape==0.5){
-        val = tuk;
+        interp = tuk;
     }else if(env_shape<=1.){
-        val = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
+        interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
     }else{
-        val = tuk;
+        interp = tuk;
     }
-    return val;
+    return interp;
+}
+
+t_sample playback(t_ec2 *x, t_atom_long voice_index, t_sample *buf){
+    t_sample playback_phase = x->voices[voice_index].play_phase;
+    t_sample scan_begin     = x->voices[voice_index].scan_begin;
+    t_sample scan_end       = x->voices[voice_index].scan_end;
+    
+    playback_phase += x->voices[voice_index].playback_rate;
+    //loop between 0 and scan_end, then add the offset for scan_begin when peeking
+    //overflow
+    playback_phase = fmod(playback_phase, scan_end+1);  //are we off-by-one? *shrug*
+    //underflow
+    playback_phase = (playback_phase<0.)?scan_end:playback_phase;
+    
+    x->voices[voice_index].play_phase = playback_phase;
+    
+    t_sample sample = peek(x->buffer_size, buf, playback_phase+scan_begin);
+    return sample;
 }
 
 void do_grain(t_ec2 *x, t_atom_long voice_index){
     
-}
-
-void voice_and_param(t_ec2 *x, t_sample ***ins_p){
-    //use this function when we're sure that everything else is working maybe
-    //get a single sample and increment the pointer ayyyy
-    t_sample trig           = *(*((*ins_p)+0))++;
-    t_sample playback_rate  = *(*((*ins_p)+1))++;
-    t_sample scan_begin     = *(*((*ins_p)+2))++;
-    t_sample scan_range     = *(*((*ins_p)+3))++;
-    t_sample scan_speed     = *(*((*ins_p)+4))++;
-    t_sample grain_duration = *(*((*ins_p)+5))++;
-    t_sample envelope_shape = *(*((*ins_p)+6))++;
-    t_sample pan            = *(*((*ins_p)+7))++;
-    t_sample amplitude      = *(*((*ins_p)+8))++;
-    
-    t_sample scan_end, scan_dur, starting_point, scan_count, window_increment;
-
-    //COUNTER
-    scan_count = x->scan_count;
-    if(x->init){
-        scan_count = scan_begin;
-        x->init = FALSE;
-    }
-    scan_count += scan_speed;
-    
-    scan_begin = CLAMP(scan_begin, 0, 1)*x->buffersize;
-    scan_range = CLAMP(scan_range, 0, 1)*x->buffersize;
-    
-    //overflow
-    scan_count = fmod(scan_count, scan_range+1);
-    //scan_count = (scan_count>=scan_range)?0:scan_count;
-    //underflow
-    scan_count = (scan_count<0)?scan_range:scan_count;
-    x->scan_count = scan_count;
-    
-    t_atom_long new_index = 0;
-    if(trig>0){
-        //VOICE ALLOCATION
-        if(x->active_voices<64){
-            x->active_voices++;
-            for(int i=0;i<64;i++){
-                if(x->voices[i].is_active==FALSE){
-                    new_index = i;
-                    x->voices[i].is_active = TRUE;
-                    break;
-                }
-            }
-            
-            //got our voice, fill in the data
-            scan_end = fmod(scan_range + scan_begin, x->buffersize+1);
-            scan_dur = 0;
-            if(scan_begin>scan_range){
-                scan_dur = x->buffersize - scan_begin + scan_end;
-            }else{
-                scan_dur = scan_end - scan_begin;
-            }
-            
-            starting_point = fmod(scan_count + scan_begin, x->buffersize+1);
-            grain_duration *= x->samplerate;
-            window_increment = (t_sample)x->window_size/grain_duration;
-            
-            x->voices[new_index].scan_begin = scan_begin;
-            x->voices[new_index].scan_end = scan_end;
-            x->voices[new_index].starting_point = starting_point;
-            x->voices[new_index].playback_rate = playback_rate;
-            x->voices[new_index].envelope_shape = CLAMP(envelope_shape, 0, 1);
-            x->voices[new_index].pan = CLAMP(pan, -1, 1);
-            x->voices[new_index].amplitude = CLAMP(amplitude, 0, 1);
-            x->voices[new_index].window_increment = window_increment;
-        }
-    }
 }
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
@@ -183,9 +130,9 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     
     t_buffer_obj *bref = buffer_ref_getobject(x->l_buffer_reference);
     if(!bref){
-        x->buffersize = 1;
+        x->buffer_size = 1;
     }else{
-        x->buffersize = buffer_getframecount(bref)-1;
+        x->buffer_size = buffer_getframecount(bref)-1;
     }
     
     t_float *buffersamps = buffer_locksamples(bref);
@@ -216,8 +163,8 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         }
         scan_count += scan_speed;
         
-        scan_begin = CLAMP(scan_begin, 0, 1)*x->buffersize;
-        scan_range = CLAMP(scan_range, 0, 1)*x->buffersize;
+        scan_begin = CLAMP(scan_begin, 0, 1)*x->buffer_size;
+        scan_range = CLAMP(scan_range, 0, 1)*x->buffer_size;
         
         //overflow
         scan_count = fmod(scan_count, scan_range+1);
@@ -240,15 +187,15 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 }
                 
                 //got our voice, fill in the data
-                scan_end = fmod(scan_range + scan_begin, x->buffersize+1);
+                scan_end = fmod(scan_range + scan_begin, x->buffer_size+1);
                 scan_dur = 0;
                 if(scan_begin>scan_range){
-                    scan_dur = x->buffersize - scan_begin + scan_end;
+                    scan_dur = x->buffer_size - scan_begin + scan_end;
                 }else{
                     scan_dur = scan_end - scan_begin;
                 }
                 
-                starting_point = fmod(scan_count + scan_begin, x->buffersize+1);
+                starting_point = fmod(scan_count + scan_begin, x->buffer_size+1);
                 grain_duration *= (x->samplerate/1000.);
 
                 t_sample window_size = x->window_size;
@@ -256,16 +203,15 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 
                 x->voices[new_index].scan_begin = scan_begin;
                 x->voices[new_index].scan_end = scan_end;
-                x->voices[new_index].starting_point = starting_point;
+                x->voices[new_index].starting_point = starting_point; //very possibly unneeded
                 x->voices[new_index].playback_rate = playback_rate;
-                //probably unneeded
                 x->voices[new_index].envelope_shape = CLAMP(envelope_shape, 0, 1);
                 x->voices[new_index].pan = CLAMP(pan, -1, 1);
                 x->voices[new_index].amplitude = CLAMP(amplitude, 0, 1);
                 x->voices[new_index].window_increment = window_increment;
                 
                 x->voices[new_index].window_phase = 0;
-                x->voices[new_index].play_phase = 0;
+                x->voices[new_index].play_phase = starting_point;
             }
         }
         //PLAYBACK
@@ -273,7 +219,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         t_sample wp_acc = 0;
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
-                t_sample val = do_window_alt(x, i);
+                t_sample val = window(x, i);
                 accum += val;
                 wp_acc += x->voices[i].window_phase;
             }
@@ -315,17 +261,6 @@ void ec2_free(t_ec2 *x){
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s){
     if(m == ASSIST_INLET){
         switch(a){
-                /*
-                 t_sample *p_trig = ins[0];
-                 t_sample *p_playback_rate = ins[1];
-                 t_sample *p_scan_begin = ins[2];
-                 t_sample *p_scan_range = ins[3];
-                 t_sample *p_scan_speed = ins[4];
-                 t_sample *p_grain_duration = ins[5];
-                 t_sample *p_envelope_shape = ins[6];
-                 t_sample *p_pan = ins[7];
-                 t_sample *p_amplitude = ins[8];
-                 */
             case 0:
                 sprintf(s, "(signal) Trigger");
                 break;
@@ -362,6 +297,77 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s){
             case 1:
                 sprintf(s, "(signal) Right output");
                 break;
+        }
+    }
+}
+
+void voice_and_param(t_ec2 *x, t_sample ***ins_p){
+    //use this function when we're sure that everything else is working maybe
+    //get a single sample and increment the pointer ayyyy
+    t_sample trig           = *(*((*ins_p)+0))++;
+    t_sample playback_rate  = *(*((*ins_p)+1))++;
+    t_sample scan_begin     = *(*((*ins_p)+2))++;
+    t_sample scan_range     = *(*((*ins_p)+3))++;
+    t_sample scan_speed     = *(*((*ins_p)+4))++;
+    t_sample grain_duration = *(*((*ins_p)+5))++;
+    t_sample envelope_shape = *(*((*ins_p)+6))++;
+    t_sample pan            = *(*((*ins_p)+7))++;
+    t_sample amplitude      = *(*((*ins_p)+8))++;
+    
+    t_sample scan_end, scan_dur, starting_point, scan_count, window_increment;
+    
+    //COUNTER
+    scan_count = x->scan_count;
+    if(x->init){
+        scan_count = scan_begin;
+        x->init = FALSE;
+    }
+    scan_count += scan_speed;
+    
+    scan_begin = CLAMP(scan_begin, 0, 1)*x->buffer_size;
+    scan_range = CLAMP(scan_range, 0, 1)*x->buffer_size;
+    
+    //overflow
+    scan_count = fmod(scan_count, scan_range+1);
+    //scan_count = (scan_count>=scan_range)?0:scan_count;
+    //underflow
+    scan_count = (scan_count<0)?scan_range:scan_count;
+    x->scan_count = scan_count;
+    
+    t_atom_long new_index = 0;
+    if(trig>0){
+        //VOICE ALLOCATION
+        if(x->active_voices<64){
+            x->active_voices++;
+            for(int i=0;i<64;i++){
+                if(x->voices[i].is_active==FALSE){
+                    new_index = i;
+                    x->voices[i].is_active = TRUE;
+                    break;
+                }
+            }
+            
+            //got our voice, fill in the data
+            scan_end = fmod(scan_range + scan_begin, x->buffer_size+1);
+            scan_dur = 0;
+            if(scan_begin>scan_range){
+                scan_dur = x->buffer_size - scan_begin + scan_end;
+            }else{
+                scan_dur = scan_end - scan_begin;
+            }
+            
+            starting_point = fmod(scan_count + scan_begin, x->buffer_size+1);
+            grain_duration *= x->samplerate;
+            window_increment = (t_sample)x->window_size/grain_duration;
+            
+            x->voices[new_index].scan_begin = scan_begin;
+            x->voices[new_index].scan_end = scan_end;
+            x->voices[new_index].starting_point = starting_point;
+            x->voices[new_index].playback_rate = playback_rate;
+            x->voices[new_index].envelope_shape = CLAMP(envelope_shape, 0, 1);
+            x->voices[new_index].pan = CLAMP(pan, -1, 1);
+            x->voices[new_index].amplitude = CLAMP(amplitude, 0, 1);
+            x->voices[new_index].window_increment = window_increment;
         }
     }
 }

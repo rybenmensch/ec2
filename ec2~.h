@@ -29,7 +29,7 @@ typedef struct _ec2 {
     t_pxobject p_ob;
     t_float samplerate;
     t_buffer_ref *l_buffer_reference;
-    t_atom_long buffersize;
+    t_atom_long buffer_size;
     t_sample *tukey;
     t_sample *expodec;
     t_sample *rexpodec;
