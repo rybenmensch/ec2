@@ -73,6 +73,35 @@ t_sample do_window(t_ec2 *x, t_atom_long voice_index){
     return val;
 }
 
+t_sample do_window_alt(t_ec2 *x, t_atom_long voice_index){
+    t_sample window_phase = x->voices[voice_index].window_phase;
+    window_phase += x->voices[voice_index].window_increment;
+
+    x->voices[voice_index].window_phase = window_phase;
+    if(window_phase>x->voices[voice_index].grain_duration){
+        x->voices[voice_index].is_active = FALSE;
+        x->active_voices--;
+        return 0;
+    }
+    
+    t_sample tuk        = peek(x->window_size, x->tukey, window_phase);
+    t_sample expo       = peek(x->window_size, x->expodec, window_phase);
+    t_sample rexpo      = peek(x->window_size, x->rexpodec, window_phase);
+    t_sample env_shape  = x->voices[voice_index].envelope_shape;
+    
+    t_sample val = 0;
+    if(env_shape <0.5){
+        val = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
+    }else if(env_shape==0.5){
+        val = tuk;
+    }else if(env_shape<=1.){
+        val = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
+    }else{
+        val = tuk;
+    }
+    return val;
+}
+
 void do_grain(t_ec2 *x, t_atom_long voice_index){
     
 }

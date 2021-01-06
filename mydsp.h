@@ -11,13 +11,13 @@ extern void pan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
     *out_r = in * pan_r;
 }
 
-extern t_sample peek(t_ec2 *x, t_sample *buf, t_sample index){
+extern t_sample peek(t_atom_long window_size, t_sample *buf, t_sample index){
     //index in samples (mit fract)
     int index_trunc = floor(index);
     
     t_sample index_fract = index - index_trunc;
     index_trunc++;
-    t_bool index_ignore = ((index_trunc >= x->window_size) || (index_trunc<0));
+    t_bool index_ignore = ((index_trunc >= window_size) || (index_trunc<0));
     
     t_sample read = (index_ignore)?0:buf[index_trunc];
     t_sample readinterp = cosine_interp(index_fract, read, read);
@@ -55,14 +55,11 @@ extern void calculate_windows(t_ec2 *x){
 }
 
 extern t_sample windowsamp(t_ec2 *x, t_atom_long voice_index, t_sample index){
-    //index verwechselt?????
-    //index from args needs to be t_sample
-    //index in samples (mit fract)
     t_sample tuk    = peek(x->window_size, x->tukey, index);
     t_sample expo   = peek(x->window_size, x->expodec, index);
     t_sample rexpo  = peek(x->window_size, x->rexpodec, index);
     t_sample val = 0;
-    t_sample env_shape = x->voices[voice_index].envelope_shape;   //index hier ist falsch, pass envshape as param
+    t_sample env_shape = x->voices[voice_index].envelope_shape;
     
     if(env_shape <0.5){
         val = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
