@@ -86,20 +86,22 @@ t_sample window(t_ec2 *x, t_atom_long voice_index){
 }
 
 t_sample playback(t_ec2 *x, t_atom_long voice_index, t_sample *buf){
-    t_sample playback_phase = x->voices[voice_index].play_phase;
+    //crashes
+    t_sample play_phase = x->voices[voice_index].play_phase;
     t_sample scan_begin     = x->voices[voice_index].scan_begin;
     t_sample scan_end       = x->voices[voice_index].scan_end;
     
-    playback_phase += x->voices[voice_index].playback_rate;
+    play_phase += x->voices[voice_index].playback_rate;
     //loop between 0 and scan_end, then add the offset for scan_begin when peeking
     //overflow
-    playback_phase = fmod(playback_phase, scan_end+1);  //are we off-by-one? *shrug*
+    play_phase = fmod(play_phase, scan_end+1);  //are we off-by-one? *shrug*
     //underflow
-    playback_phase = (playback_phase<0.)?scan_end:playback_phase;
+    play_phase = (play_phase<0.)?scan_end:play_phase;
     
-    x->voices[voice_index].play_phase = playback_phase;
+    x->voices[voice_index].play_phase = play_phase;
+    t_sample peek_point = fmod(play_phase+scan_begin, scan_end);    //vorher, nachher?
     
-    t_sample sample = peek(x->buffer_size, buf, playback_phase+scan_begin);
+    t_sample sample = peek(x->buffer_size, buf, peek_point);
     return sample;
 }
 
@@ -145,15 +147,16 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         t_sample scan_end, scan_dur, starting_point, scan_count, window_increment;
 
         //increment all pointers, get all values
+        //if not connected, assign a default value
         trig            = *p_trig++;
-        playback_rate   = *p_playback_rate++;
-        scan_begin      = *p_scan_begin++;
-        scan_range      = *p_scan_range++;
-        scan_speed      = *p_scan_speed++;
-        grain_duration  = *p_grain_duration++;
-        envelope_shape  = *p_envelope_shape++;
-        pan             = *p_pan++;
-        amplitude       = *p_amplitude++;
+        playback_rate   = *p_playback_rate++;   playback_rate   = (x->count[1])?playback_rate:1.;
+        scan_begin      = *p_scan_begin++;      scan_begin      = (x->count[2])?scan_begin:0.;
+        scan_range      = *p_scan_range++;      scan_range      = (x->count[3])?scan_range:1.;
+        scan_speed      = *p_scan_speed++;      scan_speed      = (x->count[4])?scan_speed:1.;
+        grain_duration  = *p_grain_duration++;  grain_duration = (x->count[5])?grain_duration:100;
+        envelope_shape  = *p_envelope_shape++;  envelope_shape  = (x->count[6])?envelope_shape:0.5;
+        pan             = *p_pan++;             pan             = (x->count[7])?pan:0.;
+        amplitude       = *p_amplitude++;       amplitude       = (x->count[8])?amplitude:1.;
         
         //COUNTER
         scan_count = x->scan_count;
@@ -215,22 +218,31 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
             }
         }
         //PLAYBACK
+        t_sample accum_l = 0;
+        t_sample accum_r = 0;
         t_sample accum = 0;
-        t_sample wp_acc = 0;
+        
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
-                t_sample val = window(x, i);
-                accum += val;
-                wp_acc += x->voices[i].window_phase;
+                t_sample windowsamp = window(x, i);
+                t_sample playbacksamp = playback(x, i, (t_sample *)buffersamps);
+                playbacksamp *= windowsamp;
+                accum += playbacksamp;
+                //make a panning wrapper function
+                t_sample pan_l, pan_r;
+                cospan(playbacksamp, x->voices[i].pan, &pan_l, &pan_r);
+                accum_l += pan_l;
+                accum_r += pan_r;
             }
         }
         
-        *out_l++ = 0;
-        *out_r++ = 0;
+        //*out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
+        *out_l++ = FIX_DENORM_NAN_SAMPLE(accum);
+        *out_r++ = FIX_DENORM_NAN_SAMPLE(accum_r);
         
         *debug1++ = x->active_voices;
-        *debug2++ = FIX_DENORM_NAN_SAMPLE(wp_acc);
-        *debug3++ = accum;
+        *debug2++ = 0;
+        *debug3++ = 0;
 
         for(int i=0;i<64;i++){
          *mc_outs[i]++ = x->voices[i].is_active;

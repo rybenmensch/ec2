@@ -2,7 +2,7 @@
 #define mydsp_h
 #include "ec2~.h"
 
-extern void pan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
+extern void cospan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
     pan = (pan*0.5)+0.5;
     t_sample pan_scaled = CLAMP(pan, 0, 1)/4.;
     t_sample pan_l = cos(pan_scaled * TWOPI);
