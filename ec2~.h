@@ -10,7 +10,6 @@ typedef struct _voice{
     t_bool is_active;
     t_sample playback_rate;
     t_sample play_phase;
-    t_sample grain_duration;
     t_sample window_phase;
     t_sample window_increment;
     t_sample envelope_shape;

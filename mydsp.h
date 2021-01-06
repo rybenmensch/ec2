@@ -53,25 +53,5 @@ extern void calculate_windows(t_ec2 *x){
         x->rexpodec[i] = val;
     }
 }
-/*
-extern t_sample windowsamp(t_ec2 *x, t_atom_long voice_index, t_sample index){
-    t_sample tuk    = peek(x->window_size, x->tukey, index);
-    t_sample expo   = peek(x->window_size, x->expodec, index);
-    t_sample rexpo  = peek(x->window_size, x->rexpodec, index);
-    t_sample val = 0;
-    t_sample env_shape = x->voices[voice_index].envelope_shape;
-    
-    if(env_shape <0.5){
-        val = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
-    }else if(env_shape==0.5){
-        val = tuk;
-    }else if(env_shape<=1.){
-        val = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
-    }else{
-        val = tuk;
-    }
-    return val;
-}
-*/
 
 #endif /* mydsp_h */
