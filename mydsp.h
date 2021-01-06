@@ -24,6 +24,19 @@ extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
     return readinterp;
 }
 
+extern float fpeek(t_float *buf, t_atom_long buffer_size, t_float index){
+    //index in samples (mit fract)
+    t_atom_long index_trunc = floor(index);
+    
+    t_float index_fract = index - index_trunc;
+    index_trunc++;
+    t_bool index_ignore = ((index_trunc >= buffer_size) || (index_trunc<0));
+    
+    t_float read = (index_ignore)?0:buf[index_trunc];
+    t_float readinterp = cosine_interp(index_fract, read, read);
+    return readinterp;
+}
+
 extern void calculate_windows(t_ec2 *x){
     t_atom_long size = x->window_size-1;
     

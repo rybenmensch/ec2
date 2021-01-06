@@ -46,6 +46,8 @@ typedef struct _ec2 {
     t_atom_long testcounter;
     t_sample *buffer;
     
+    t_bool buffer_modified;
+    
     short count[9];
 } t_ec2;
 
@@ -77,14 +79,22 @@ void ec2_dblclick(t_ec2 *x){
 }
 
 t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data){
-    return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
+    if(buffer_ref_exists(x->l_buffer_reference)){
+        if(msg == ps_buffer_modified){
+            x->buffer_modified = TRUE;
+        }
+        return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
+    }else{
+        return MAX_ERR_NONE;
+    }
 }
 
 long ec2_multichanneloutputs(t_ec2 *x, long index){
-    if(5==index){
+    if(2==index){
         return x->total_voices;
     }else{
         return 1;
     }
 }
+
 #endif /* ec2__h */
