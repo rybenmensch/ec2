@@ -15,38 +15,46 @@ typedef struct _voice{
     t_sample envelope_shape;
     t_sample pan;
     t_sample amplitude;    
-    //um die playback-funktion einzugrenzen
     t_sample scan_begin;
-    t_sample scan_end;
-    
-    t_sample out_l;
-    t_sample out_r;
+    t_sample scan_end;    
+    //t_sample out_l;
+    //t_sample out_r;
 }t_voice;
+
+typedef struct _stream{
+    t_bool is_active;
+    t_atom_long active_voices;
+    t_voice *voices;
+}t_stream;
 
 typedef struct _ec2 {
     t_pxobject p_ob;
     t_float samplerate;
     t_buffer_ref *l_buffer_reference;
     t_atom_long buffer_size;
+    t_sample *buffer;
     t_atom_long channel_count;
+    
     t_sample *tukey;
     t_sample *expodec;
     t_sample *rexpodec;
     t_atom_long window_size;
+    
     t_atom_long total_voices;
     t_atom_long active_voices;
+    t_atom_long total_streams;
+    t_atom_long active_streams;
     t_voice *voices;
+    t_stream *streams;
+    
     t_bool init;
     t_sample scan_count;
-    t_sample scan_begin;
-    t_sample scan_end;
-    
     t_atom_long testcounter;
-    t_sample *buffer;
     
     t_bool buffer_modified;
-    
     short count[9];
+    
+    t_atom_long input_count;
 } t_ec2;
 
 t_symbol *ps_buffer_modified;
@@ -58,9 +66,19 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
+long ec2_inputchanged(t_ec2 *x, long index, long count){
+    if(count != x->input_count){
+        x->input_count = count;
+        return TRUE;
+    }else{
+        return FALSE;
+    }
+}
+
 void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
     x->samplerate = sys_getsr();
     sysmem_copyptr(count, x->count, 9*sizeof(short));
+    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
     object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
 }
 

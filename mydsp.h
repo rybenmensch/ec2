@@ -2,9 +2,18 @@
 #define mydsp_h
 #include "ec2~.h"
 
+extern t_sample mfmod(t_sample x, t_sample y){
+    t_sample modulated = x;
+    t_sample modulor = y;
+    t_sample a;
+    a=modulated/modulor;
+    a-=(int)a;
+    return a*modulor;
+}
+
 extern void cospan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
-    pan = (pan*0.5)+0.5;
-    t_sample pan_scaled = CLAMP(pan, 0, 1)/4.;
+    t_sample p = (pan*0.5)+0.5;
+    t_sample pan_scaled = CLAMP(p, 0, 1)/4.;
     t_sample pan_l = cos(pan_scaled * TWOPI);
     t_sample pan_r = cos((pan_scaled + 0.75) * TWOPI);
     *out_l = in * pan_l;
@@ -12,8 +21,8 @@ extern void cospan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
 }
 
 extern void cospano(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
-    pan = (pan*0.5)+0.5;
-    t_sample pan_scaled = CLAMP(pan, 0, 1)/4.;
+    t_sample p = (pan*0.5)+0.5;
+    t_sample pan_scaled = CLAMP(p, 0, 1)/4.;
     t_sample pan_l = cos(pan_scaled * TWOPI);
     t_sample pan_r = cos((pan_scaled + 0.75) * TWOPI);
     *out_l = in * pan_l;
@@ -21,6 +30,7 @@ extern void cospano(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r)
 }
 
 extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
+    //channel information?
     //index in samples (mit fract)
     t_atom_long index_trunc = floor(index);
     
