@@ -59,13 +59,15 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->total_streams = 12;
     x->active_streams = 1;
     
+    /*
     x->voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
     for(int i=0;i<x->total_voices;i++){
         x->voices[i].is_active = 0;
         x->voices[i].play_phase = 0.;
         x->voices[i].window_phase = 0.;
     }
-    
+    */
+     
     x->streams = (t_stream *)sysmem_newptr(x->total_streams * sizeof(t_voice));
     for(int i=0;i<x->total_streams;i++){
         x->streams[i].is_active = (i==0);   //activate first stream only
@@ -159,7 +161,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         p_trig[i] = ins[i];
     }
     
-    //t_sample *p_trig            = ins[0];
     t_sample *p_playback_rate   = ins[x->active_streams+0];
     t_sample *p_scan_begin      = ins[x->active_streams+1];
     t_sample *p_scan_range      = ins[x->active_streams+2];
@@ -217,7 +218,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
             trig_arr[i] = *(p_trig[i])++;
         }
         trig            = trig_arr[0];
-        //trig            = *p_trig++;
         playback_rate   = *p_playback_rate++;   playback_rate   = (x->count[1])?playback_rate:1.;
         scan_begin      = *p_scan_begin++;      scan_begin      = (x->count[2])?scan_begin:0.;
         scan_range      = *p_scan_range++;      scan_range      = (x->count[3])?scan_range:1.;
@@ -245,13 +245,53 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         scan_count = (scan_count<0)?scan_range:scan_count;
         x->scan_count = scan_count;
         scan_end = fmod(scan_range + scan_begin, x->buffer_size+1);
+        
+        for(int current_stream=0;current_stream<x->total_streams;current_stream++){
+            t_stream *stream = &x->streams[current_stream];
+            t_atom_long stream_new_index = 0;
 
-        t_atom_long new_index = 0;
-        for(int i=0;i<x->total_streams;i++){
-            if(trig_arr[i]>0.){
-                
+            if(trig_arr[current_stream]>0.){
+                if(stream->active_voices<x->total_voices){
+                /////put this in a function maybe?
+                    stream->active_voices++;
+                    for(int j=0;j<x->total_voices;j++){
+                        if(stream->voices[j].is_active){
+                            stream_new_index = j;
+                            stream->voices[j].is_active = TRUE;
+                            break;
+                        }
+                    }
+                    
+                    //got our voice, fill in the data
+                    scan_dur = 0;
+                    if(scan_begin>scan_range){
+                        scan_dur = x->buffer_size - scan_begin + scan_end;
+                    }else{
+                        scan_dur = scan_end - scan_begin;
+                    }
+                    
+                    starting_point = fmod(scan_count + scan_begin, x->buffer_size+1);
+                    grain_duration *= (x->samplerate/1000.);
+                    
+                    t_sample window_size = x->window_size;
+                    window_increment = ((t_sample) (window_size))/grain_duration;
+                    
+                    stream->voices[stream_new_index].scan_begin        = scan_begin;
+                    stream->voices[stream_new_index].scan_end          = scan_end;
+                    stream->voices[stream_new_index].playback_rate     = playback_rate;
+                    stream->voices[stream_new_index].envelope_shape    = CLAMP(envelope_shape, 0, 1);
+                    stream->voices[stream_new_index].pan               = CLAMP(pan, -1, 1);
+                    stream->voices[stream_new_index].amplitude         = CLAMP(amplitude, 0, 1);
+                    stream->voices[stream_new_index].window_increment  = window_increment;
+                    
+                    stream->voices[stream_new_index].window_phase      = 0;
+                    stream->voices[stream_new_index].play_phase        = starting_point;
+                }/////end of function?
             }
         }
+        
+        /*
+        t_atom_long new_index = 0;
         if(trig>0.){
             //VOICE ALLOCATION
             if(x->active_voices<x->total_voices){
@@ -290,6 +330,8 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 x->voices[new_index].play_phase = starting_point;
             }
         }
+        */
+        
         //PLAYBACK
         t_sample accum_l = 0;
         t_sample accum_r = 0;
