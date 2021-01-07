@@ -23,14 +23,12 @@ void ext_main(void *r){
 void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     t_ec2 *x = (t_ec2 *)object_alloc(ec2_class);
     dsp_setup((t_pxobject * )x, 9);
-    
-    for(int i=0;i<3;i++){
-        outlet_new((t_object *)x, "signal");
-    }
     outlet_new((t_object *)x, "multichannelsignal");
-    for(int i=0;i<2;i++){
+
+    for(int i=0;i<6;i++){
         outlet_new((t_object *)x, "signal");
     }
+
     
     x->window_size = 512;
     
@@ -56,6 +54,7 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->testcounter = 0;
     x->buffer = NULL;
     x->buffer_modified = TRUE;
+    x->buffer_size = 1;
     
     t_symbol *bufname = atom_getsymarg(0, argc, argv);
     ec2_set(x, bufname);
@@ -111,30 +110,42 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index, t_sample *buf){
     return sample;
 }
 
-void ec2_buffer_modified(t_ec2 *x, t_buffer_obj *bref){
+//OPTIMIZATION THOUGHTS
+//apparently it's faster if there are no functions in for loops, so check that out
 
-}
+//t_sample mfmod(t_sample x, t_sample y){double a;a=x/y;a-=(int)a; return a*y;}
+//as a replacement for fmod?
+//or comparison if over threshold and then reset?
+
+//calculating expo and tukey instead of LUT?
+
+//fast cos in panning function? maybe not as gen~ itself doesn't do that in the exported cospan.gendsp
+
+//assign defaults at block rate?
+
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
-    t_sample *p_trig = ins[0];
-    t_sample *p_playback_rate = ins[1];
-    t_sample *p_scan_begin = ins[2];
-    t_sample *p_scan_range = ins[3];
-    t_sample *p_scan_speed = ins[4];
-    t_sample *p_grain_duration = ins[5];
-    t_sample *p_envelope_shape = ins[6];
-    t_sample *p_pan = ins[7];
-    t_sample *p_amplitude = ins[8];
+    t_sample *p_trig            = ins[0];
+    t_sample *p_playback_rate   = ins[1];
+    t_sample *p_scan_begin      = ins[2];
+    t_sample *p_scan_range      = ins[3];
+    t_sample *p_scan_speed      = ins[4];
+    t_sample *p_grain_duration  = ins[5];
+    t_sample *p_envelope_shape  = ins[6];
+    t_sample *p_pan             = ins[7];
+    t_sample *p_amplitude       = ins[8];
 
-    t_sample *out_l = outs[0];
-    t_sample *out_r = outs[1];
+    t_sample *out_l             = outs[0];
+    t_sample *out_r             = outs[1];
+    t_sample *debug1            = outs[2];
+    t_sample *debug2            = outs[3];
+    t_sample *debug3            = outs[4];
+    t_sample *debug4            = outs[5];
+    
     t_sample *mc_outs[x->total_voices];
     for(int i=0;i<x->total_voices;i++){
-        mc_outs[i] = outs[i+2];
+        mc_outs[i] = outs[i+6];
     }
-    t_sample *debug1 = outs[x->total_voices+2];
-    t_sample *debug2 = outs[x->total_voices+3];
-    t_sample *debug3 = outs[x->total_voices+4];
     
     t_buffer_obj *bref = buffer_ref_getobject(x->l_buffer_reference);
     t_float *buffersamps = buffer_locksamples(bref);
@@ -161,14 +172,13 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     long n=sampleframes;
     //we'll have to handle amount of channels later
     //multiply the index by the amount of channels that there are
-    
-    //apparently it's faster if there are no functions in for loops, so check that out
+ 
+
     while(n--){
         t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude;
         t_sample scan_end, scan_dur, starting_point, scan_count, window_increment;
 
         //increment all pointers, get all values, if not connected, assign defaults
-        //assign defaults at block rate?
         trig            = *p_trig++;
         playback_rate   = *p_playback_rate++;   playback_rate   = (x->count[1])?playback_rate:1.;
         scan_begin      = *p_scan_begin++;      scan_begin      = (x->count[2])?scan_begin:0.;
@@ -196,6 +206,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         //underflow
         scan_count = (scan_count<0)?scan_range:scan_count;
         x->scan_count = scan_count;
+        scan_end = fmod(scan_range + scan_begin, x->buffer_size+1);
 
         t_atom_long new_index = 0;
         if(trig>0.){
@@ -211,7 +222,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 }
                 
                 //got our voice, fill in the data
-                scan_end = fmod(scan_range + scan_begin, x->buffer_size+1);
                 scan_dur = 0;
                 if(scan_begin>scan_range){
                     scan_dur = x->buffer_size - scan_begin + scan_end;
@@ -227,7 +237,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 
                 x->voices[new_index].scan_begin = scan_begin;
                 x->voices[new_index].scan_end = scan_end;
-                x->voices[new_index].starting_point = starting_point; //very possibly unneeded
                 x->voices[new_index].playback_rate = playback_rate;
                 x->voices[new_index].envelope_shape = CLAMP(envelope_shape, 0, 1);
                 x->voices[new_index].pan = CLAMP(pan, -1, 1);
@@ -236,7 +245,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 
                 x->voices[new_index].window_phase = 0;
                 x->voices[new_index].play_phase = starting_point;
-                //x->voices[new_index].play_phase = 0;
             }
         }
         //PLAYBACK
@@ -254,7 +262,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 playbacksamp *= windowsamp;
                 playbacksamp *= x->voices[i].amplitude;
                 playbacksamp *= (t_sample) 1./x->total_voices;
-                //normallizing for now until I come up with something smarter
+                //normalizing for now until I come up with something smarter
                 accum += playbacksamp;
 
                 t_sample pan_l, pan_r;
@@ -267,10 +275,11 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         *out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
         *out_r++ = FIX_DENORM_NAN_SAMPLE(accum_r);
         
-        //multichannel output for scan start, end and scan pos
+        //single channel output of active voices
         *debug1++ = x->active_voices;
-        *debug2++ = w_accum;
-        *debug3++ = 0;
+        *debug2++ = (t_sample)(fmod(scan_count + scan_begin, x->buffer_size+1))/x->buffer_size;
+        *debug3++ = (t_sample)scan_begin/x->buffer_size;
+        *debug4++ = (t_sample)scan_end/x->buffer_size;
 
         for(int i=0;i<x->total_voices;i++){
          *mc_outs[i]++ = x->voices[i].is_active;

@@ -11,6 +11,15 @@ extern void cospan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
     *out_r = in * pan_r;
 }
 
+extern void cospano(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
+    pan = (pan*0.5)+0.5;
+    t_sample pan_scaled = CLAMP(pan, 0, 1)/4.;
+    t_sample pan_l = cos(pan_scaled * TWOPI);
+    t_sample pan_r = cos((pan_scaled + 0.75) * TWOPI);
+    *out_l = in * pan_l;
+    *out_r = in * pan_r;
+}
+
 extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
     //index in samples (mit fract)
     t_atom_long index_trunc = floor(index);

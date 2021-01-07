@@ -14,9 +14,7 @@ typedef struct _voice{
     t_sample window_increment;
     t_sample envelope_shape;
     t_sample pan;
-    t_sample amplitude;
-    t_sample starting_point;
-    
+    t_sample amplitude;    
     //um die playback-funktion einzugrenzen
     t_sample scan_begin;
     t_sample scan_end;
@@ -90,7 +88,7 @@ t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *d
 }
 
 long ec2_multichanneloutputs(t_ec2 *x, long index){
-    if(2==index){
+    if(6==index){
         return x->total_voices;
     }else{
         return 1;
