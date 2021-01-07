@@ -68,7 +68,7 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     
     x->streams = (t_stream *)sysmem_newptr(x->total_streams * sizeof(t_voice));
     for(int i=0;i<x->total_streams;i++){
-        x->streams[i].is_active = (i==0);   //activate first stream
+        x->streams[i].is_active = (i==0);   //activate first stream only
         x->streams[i].active_voices = 0;
         x->streams[i].voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
 
