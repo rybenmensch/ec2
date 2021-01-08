@@ -13,7 +13,10 @@
 
 //fast cos in panning function? maybe not as gen~ itself doesn't do that in the exported cospan.gendsp
 
-//assign defaults at block rate?
+//assign defaults/some things in general at block rate?
+
+//could this be faster?
+//playback_rate   = (count[1]*playback_rate)+(count[1]*1);
 
 //OPTIMIZE LAST...
 
@@ -155,20 +158,24 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index){
  */
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
-    x->active_streams = CLAMP(x->input_count, 1, x->total_streams);
-    t_sample *p_trig[x->active_streams];
-    for(int i=0;i<x->active_streams;i++){
+    t_atom_long total_streams = x->total_streams;
+    t_atom_long total_voices = x->total_voices;
+    t_atom_long active_streams = x->active_streams;
+    active_streams = CLAMP(x->input_count, 1, total_streams);
+    
+    t_sample *p_trig[active_streams];
+    for(int i=0;i<active_streams;i++){
         p_trig[i] = ins[i];
     }
     
-    t_sample *p_playback_rate   = ins[x->active_streams+0];
-    t_sample *p_scan_begin      = ins[x->active_streams+1];
-    t_sample *p_scan_range      = ins[x->active_streams+2];
-    t_sample *p_scan_speed      = ins[x->active_streams+3];
-    t_sample *p_grain_duration  = ins[x->active_streams+4];
-    t_sample *p_envelope_shape  = ins[x->active_streams+5];
-    t_sample *p_pan             = ins[x->active_streams+6];
-    t_sample *p_amplitude       = ins[x->active_streams+7];
+    t_sample *p_playback_rate   = ins[active_streams+0];
+    t_sample *p_scan_begin      = ins[active_streams+1];
+    t_sample *p_scan_range      = ins[active_streams+2];
+    t_sample *p_scan_speed      = ins[active_streams+3];
+    t_sample *p_grain_duration  = ins[active_streams+4];
+    t_sample *p_envelope_shape  = ins[active_streams+5];
+    t_sample *p_pan             = ins[active_streams+6];
+    t_sample *p_amplitude       = ins[active_streams+7];
 
     t_sample *out_l             = outs[0];
     t_sample *out_r             = outs[1];
@@ -177,8 +184,8 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_sample *debug3            = outs[4];
     t_sample *debug4            = outs[5];
 
-    t_sample *mc_outs[x->total_voices];
-    for(int i=0;i<x->total_voices;i++){
+    t_sample *mc_outs[total_voices];
+    for(int i=0;i<total_voices;i++){
         mc_outs[i] = outs[i+6];
     }
 
@@ -205,28 +212,33 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     }
 
     long n=sampleframes;
+    t_atom_long buffer_size = x->buffer_size;
+    t_atom_long window_size = x->window_size;
+    t_float samplerate      = x->samplerate;
+    short count[9];
+    sysmem_copyptr(x->count, count, 9*sizeof(short));
+    
     //we'll have to handle amount of channels later
     //multiply the index by the amount of channels that there are
  
     while(n--){
-        t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude;
-        t_sample trig_arr[x->active_streams];
+        t_sample trig_arr[active_streams];
+        t_sample playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude;
         t_sample scan_end, scan_dur, starting_point, scan_count, window_increment;
 
         //increment all pointers, get all values, if not connected, assign defaults
-        for(int i=0;i<x->active_streams;i++){
+        for(int i=0;i<active_streams;i++){
             trig_arr[i] = *(p_trig[i])++;
         }
-        trig            = trig_arr[0];
         playback_rate   = *p_playback_rate++;   playback_rate   = (x->count[1])?playback_rate:1.;
         scan_begin      = *p_scan_begin++;      scan_begin      = (x->count[2])?scan_begin:0.;
         scan_range      = *p_scan_range++;      scan_range      = (x->count[3])?scan_range:1.;
         scan_speed      = *p_scan_speed++;      scan_speed      = (x->count[4])?scan_speed:1.;
-        grain_duration  = *p_grain_duration++;  grain_duration = (x->count[5])?grain_duration:100;
+        grain_duration  = *p_grain_duration++;  grain_duration  = (x->count[5])?grain_duration:100;
         envelope_shape  = *p_envelope_shape++;  envelope_shape  = (x->count[6])?envelope_shape:0.5;
         pan             = *p_pan++;             pan             = (x->count[7])?pan:0.;
         amplitude       = *p_amplitude++;       amplitude       = (x->count[8])?amplitude:1.;
-
+        
         //COUNTER
         scan_count = x->scan_count;
         if(x->init){
@@ -235,18 +247,17 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         }
         scan_count += scan_speed;
 
-        scan_begin = CLAMP(scan_begin, 0, 1)*x->buffer_size;
-        scan_range = CLAMP(scan_range, 0, 1)*x->buffer_size;
+        scan_begin = CLAMP(scan_begin, 0, 1)*buffer_size;
+        scan_range = CLAMP(scan_range, 0, 1)*buffer_size;
 
         //overflow
         scan_count = mfmod(scan_count, scan_range+1);
         //scan_count = (scan_count>=scan_range)?0:scan_count;
         //underflow
         scan_count = (scan_count<0)?scan_range:scan_count;
-        x->scan_count = scan_count;
-        scan_end = fmod(scan_range + scan_begin, x->buffer_size+1);
+        scan_end = fmod(scan_range + scan_begin, buffer_size+1);
         
-        for(int current_stream=0;current_stream<x->total_streams;current_stream++){
+        for(int current_stream=0;current_stream<total_streams;current_stream++){
             t_stream *stream = &x->streams[current_stream];
             t_atom_long stream_new_index = 0;
 
@@ -265,15 +276,14 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                     //got our voice, fill in the data
                     scan_dur = 0;
                     if(scan_begin>scan_range){
-                        scan_dur = x->buffer_size - scan_begin + scan_end;
+                        scan_dur = buffer_size - scan_begin + scan_end;
                     }else{
                         scan_dur = scan_end - scan_begin;
                     }
                     
-                    starting_point = fmod(scan_count + scan_begin, x->buffer_size+1);
-                    grain_duration *= (x->samplerate/1000.);
+                    starting_point = fmod(scan_count + scan_begin, buffer_size+1);
+                    grain_duration *= (samplerate/1000.);
                     
-                    t_sample window_size = x->window_size;
                     window_increment = ((t_sample) (window_size))/grain_duration;
                     
                     stream->voices[stream_new_index].scan_begin        = scan_begin;
@@ -332,10 +342,15 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         }
         */
         
+        //MC STREAMS PLAYBACK
+        //cache total_streams;
+        t_sample accum_l[x->total_streams];
+        t_sample accum_r[x->total_streams];
+        t_sample w_accum[x->total_streams];
+        /*
         //PLAYBACK
         t_sample accum_l = 0;
         t_sample accum_r = 0;
-        t_sample accum = 0;
 
         t_sample w_accum = 0;
         for(int i=0;i<x->total_voices;i++){
@@ -367,10 +382,16 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         *debug4++ = (t_sample)scan_end/x->buffer_size;
 
         for(int i=0;i<x->total_voices;i++){
-         *mc_outs[i]++ = x->voices[i].is_active;
+            *mc_outs[i]++ = x->voices[i].is_active;
         }
+        */
+        //reassign cached values that update sample wise HERE:
+        x->scan_count = scan_count;
     }
     buffer_unlocksamples(bref);
+    
+    //reassign cached values that update in block size HERE:
+    x->active_streams = active_streams;
     return;
 zero:
     for(int i=0;i<numouts;i++){
