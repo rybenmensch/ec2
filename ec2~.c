@@ -17,7 +17,6 @@
 
 //could this be faster?
 //playback_rate   = (count[1]*playback_rate)+(count[1]*1);
-
 //OPTIMIZE LAST...
 
 void ext_main(void *r){
@@ -28,7 +27,8 @@ void ext_main(void *r){
     class_addmethod(c, (method)ec2_assist, "assist", A_CANT, 0);
     class_addmethod(c, (method)ec2_dblclick, "dblclick", A_CANT, 0);
     class_addmethod(c, (method)ec2_notify, "notify", A_CANT, 0);
-    class_addmethod(c, (method)ec2_set, "set", A_SYM, 0);
+    //class_addmethod(c, (method)ec2_set, "set", A_SYM, 0);
+    class_addmethod(c, (method)ec2_set, "set", A_GIMME, 0);
     class_addmethod(c, (method)ec2_multichanneloutputs, "multichanneloutputs", A_CANT, 0);
     class_addmethod(c, (method)ec2_inputchanged, "inputchanged", A_CANT, 0);
 
@@ -89,13 +89,15 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->samplerate = 44100;
 
     x->testcounter = 0;
+    x->input_count = 1;
+
     x->buffer = NULL;
     x->buffer_modified = TRUE;
     x->buffer_size = 1;
-
-    t_symbol *bufname = atom_getsymarg(0, argc, argv);
-    ec2_set(x, bufname);
+    x->l_buffer_reference = NULL;
+    x->no_buffer = TRUE;
     
+    ec2_set(x, s, argc, argv);
     return (x);
 }
 
@@ -189,13 +191,14 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         mc_outs[i] = outs[i+6];
     }
 
-    t_buffer_obj *bref = buffer_ref_getobject(x->l_buffer_reference);
-    t_float *buffersamps = buffer_locksamples(bref);
-    if(!bref || !buffersamps){
+    if(x->no_buffer){
         goto zero;
     }
 
     if(x->buffer_modified){
+        ec2_buffer_limits(x);
+        /*
+        post("buffer was modified - calling from perform routine");
         x->buffer_size      = buffer_getframecount(bref)-1;
         x->channel_count    = buffer_getchannelcount(bref);
 
@@ -208,6 +211,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         for(long i=0;i<x->buffer_size;i++){
             x->buffer[i] = (t_sample)buffersamps[i];
         }
+        */
         x->buffer_modified = FALSE;
     }
 
@@ -388,7 +392,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         //reassign cached values that update sample wise HERE:
         x->scan_count = scan_count;
     }
-    buffer_unlocksamples(bref);
     
     //reassign cached values that update in block size HERE:
     x->active_streams = active_streams;

@@ -52,8 +52,10 @@ typedef struct _ec2 {
     t_atom_long testcounter;
     
     t_bool buffer_modified;
-    short count[9];
+    t_bool no_buffer;
+    t_buffer_obj *buffer_obj;
     
+    short count[9];
     t_atom_long input_count;
 } t_ec2;
 
@@ -68,40 +70,11 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
 
 long ec2_inputchanged(t_ec2 *x, long index, long count){
     if(count != x->input_count){
+        post("number of channels has changed from %ld to %ld", x->input_count, count);
         x->input_count = count;
         return TRUE;
     }else{
         return FALSE;
-    }
-}
-
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
-    x->samplerate = sys_getsr();
-    sysmem_copyptr(count, x->count, 9*sizeof(short));
-    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
-    object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
-}
-
-void ec2_set(t_ec2 *x, t_symbol *s){
-    if(!x->l_buffer_reference){
-        x->l_buffer_reference = buffer_ref_new((t_object *)x, s);
-    }else{
-        buffer_ref_set(x->l_buffer_reference, s);
-    }
-}
-
-void ec2_dblclick(t_ec2 *x){
-    buffer_view(buffer_ref_getobject(x->l_buffer_reference));
-}
-
-t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data){
-    if(buffer_ref_exists(x->l_buffer_reference)){
-        if(msg == ps_buffer_modified){
-            x->buffer_modified = TRUE;
-        }
-        return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
-    }else{
-        return MAX_ERR_NONE;
     }
 }
 
@@ -112,5 +85,73 @@ long ec2_multichanneloutputs(t_ec2 *x, long index){
         return 1;
     }
 }
+
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
+    x->samplerate = sys_getsr();
+    sysmem_copyptr(count, x->count, 9*sizeof(short));
+    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
+    object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
+}
+
+void ec2_buffer_limits(t_ec2 *x){
+    //get dimensions etc here so that we don't have to do that in the perform routine
+    if(x->buffer_obj){
+        x->buffer_size      = buffer_getframecount(x->buffer_obj)-1;
+        x->channel_count    = buffer_getchannelcount(x->buffer_obj);
+        
+        if(x->buffer){
+            sysmem_freeptr(x->buffer);
+        }
+        
+        x->buffer = (t_sample *)sysmem_newptr(x->buffer_size * sizeof(t_sample));
+        t_float *buffersamps = buffer_locksamples(x->buffer_obj);
+        
+        if(!buffersamps){
+            post("couldn't lock samples");
+        }
+        
+        for(long i=0;i<x->buffer_size;i++){
+            x->buffer[i] = (t_sample)buffersamps[i];
+        }
+        
+        buffer_unlocksamples(x->buffer_obj);
+    }
+}
+
+void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+    t_symbol *name;
+    name = (ac)?atom_getsym(av):gensym("");
+    
+    if(!x->l_buffer_reference){
+        x->l_buffer_reference = buffer_ref_new((t_object *)x, name);
+    }else{
+        buffer_ref_set(x->l_buffer_reference, name);
+    }
+    
+    if((x->buffer_obj = buffer_ref_getobject(x->l_buffer_reference))==NULL){
+        post("Buffer %s probably doesn't exist.", name->s_name);
+        x->no_buffer = TRUE;
+    }else{
+        x->no_buffer = FALSE;
+        ec2_buffer_limits(x);
+    }
+}
+
+void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+    defer(x, (method)ec2_doset, s, ac, av);
+}
+
+void ec2_dblclick(t_ec2 *x){
+    buffer_view(buffer_ref_getobject(x->l_buffer_reference));
+}
+
+t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data){
+    if(msg==ps_buffer_modified){
+        x->buffer_modified = TRUE;
+    }
+    return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
+}
+
+
 
 #endif /* ec2__h */

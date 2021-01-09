@@ -29,6 +29,8 @@ extern void cospano(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r)
     *out_r = in * pan_r;
 }
 
+//TODO:
+//linear interpoloation option (to sacrifice quality for CPU)
 extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
     //channel information?
     //index in samples (mit fract)
