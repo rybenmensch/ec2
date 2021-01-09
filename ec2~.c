@@ -162,8 +162,11 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index){
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
     t_atom_long total_streams = x->total_streams;
     t_atom_long total_voices = x->total_voices;
+    /*
     t_atom_long active_streams = x->active_streams;
     active_streams = CLAMP(x->input_count, 1, total_streams);
+    */
+    t_atom_long active_streams = CLAMP(x->input_count, 1, total_streams);
     
     t_sample *p_trig[active_streams];
     for(int i=0;i<active_streams;i++){
@@ -213,7 +216,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     while(n--){
         t_sample trig_arr[active_streams];
         t_sample playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude;
-        t_sample scan_end, scan_dur, starting_point, scan_count, window_increment;
+        t_sample scan_end, starting_point, scan_count, window_increment;
 
         //increment all pointers, get all values, if not connected, assign defaults
         for(int i=0;i<active_streams;i++){
@@ -246,7 +249,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         scan_count = (scan_count<0)?scan_range:scan_count;
         scan_end = fmod(scan_range + scan_begin, buffer_size+1);
         
-        for(int current_stream=0;current_stream<total_streams;current_stream++){
+        for(int current_stream=0;current_stream<active_streams;current_stream++){
             t_stream *stream = &x->streams[current_stream];
             t_atom_long stream_new_index = 0;
 
@@ -263,13 +266,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                     }
                     
                     //got our voice, fill in the data
-                    scan_dur = 0;
-                    if(scan_begin>scan_range){
-                        scan_dur = buffer_size - scan_begin + scan_end;
-                    }else{
-                        scan_dur = scan_end - scan_begin;
-                    }
-                    
                     starting_point = fmod(scan_count + scan_begin, buffer_size+1);
                     grain_duration *= (samplerate/1000.);
                     
@@ -304,12 +300,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 }
 
                 //got our voice, fill in the data
-                scan_dur = 0;
-                if(scan_begin>scan_range){
-                    scan_dur = x->buffer_size - scan_begin + scan_end;
-                }else{
-                    scan_dur = scan_end - scan_begin;
-                }
 
                 starting_point = fmod(scan_count + scan_begin, x->buffer_size+1);
                 grain_duration *= (x->samplerate/1000.);
@@ -460,9 +450,8 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s){
         }
     }
 }
-
+/*
 void voice_and_param(t_ec2 *x, t_sample ***ins_p){
-    /*
     //use this function when we're sure that everything else is working maybe
     //get a single sample and increment the pointer ayyyy
     t_sample trig           = *(*((*ins_p)+0))++;
@@ -474,5 +463,5 @@ void voice_and_param(t_ec2 *x, t_sample ***ins_p){
     t_sample envelope_shape = *(*((*ins_p)+6))++;
     t_sample pan            = *(*((*ins_p)+7))++;
     t_sample amplitude      = *(*((*ins_p)+8))++;
-     */
 }
+ */

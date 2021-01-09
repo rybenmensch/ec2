@@ -30,7 +30,7 @@ typedef struct _ec2 {
     t_float samplerate;
     t_buffer_ref *buffer_reference;
     t_buffer_obj *buffer_obj;
-    t_atom_long buffer_size;
+    t_atom_long buffer_size;    //should this be the exact size or one less?
     t_sample *buffersamps;
     t_atom_long channel_count;
     t_bool buffer_modified;
@@ -100,14 +100,15 @@ void ec2_buffer_limits(t_ec2 *x){
             sysmem_freeptr(x->buffersamps);
         }
         
-        x->buffersamps = (t_sample *)sysmem_newptr(x->buffer_size * sizeof(t_sample));
+        x->buffersamps = (t_sample *)sysmem_newptr((x->buffer_size+1) * sizeof(t_sample));
         t_float *buffersamps = buffer_locksamples(x->buffer_obj);
         
         if(!buffersamps){
             post("couldn't lock samples");
+            return;
         }
         
-        for(long i=0;i<x->buffer_size;i++){
+        for(long i=0;i<=x->buffer_size;i++){
             x->buffersamps[i] = (t_sample)buffersamps[i];
         }
         
