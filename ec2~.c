@@ -91,10 +91,10 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->testcounter = 0;
     x->input_count = 1;
 
-    x->buffer = NULL;
+    x->buffersamps = NULL;
     x->buffer_modified = TRUE;
     x->buffer_size = 1;
-    x->l_buffer_reference = NULL;
+    x->buffer_reference = NULL;
     x->no_buffer = TRUE;
     
     ec2_set(x, s, argc, argv);
@@ -147,7 +147,7 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index){
     play_phase = (play_phase<0.)?scan_end:play_phase;
     x->voices[voice_index].play_phase = play_phase;
     t_sample peek_point = fmod(play_phase+scan_begin, scan_end);    //vorher, nachher?
-    t_sample sample = peek(x->buffer, x->buffer_size, peek_point);
+    t_sample sample = peek(x->buffersamps, x->buffer_size, peek_point);
     return sample;
 }
 
@@ -197,21 +197,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
 
     if(x->buffer_modified){
         ec2_buffer_limits(x);
-        /*
-        post("buffer was modified - calling from perform routine");
-        x->buffer_size      = buffer_getframecount(bref)-1;
-        x->channel_count    = buffer_getchannelcount(bref);
-
-        if(x->buffer){
-            sysmem_freeptr(x->buffer);
-        }
-
-        x->buffer = (t_sample *)sysmem_newptr(x->buffer_size * sizeof(t_sample));
-
-        for(long i=0;i<x->buffer_size;i++){
-            x->buffer[i] = (t_sample)buffersamps[i];
-        }
-        */
         x->buffer_modified = FALSE;
     }
 
@@ -406,7 +391,7 @@ zero:
 
 void ec2_free(t_ec2 *x){
     dsp_free((t_pxobject *)x);
-    object_free(x->l_buffer_reference);
+    object_free(x->buffer_reference);
     if(x->tukey){
         sysmem_freeptr(x->tukey);
     }
@@ -428,8 +413,8 @@ void ec2_free(t_ec2 *x){
     }
     sysmem_freeptr(x->streams);
     
-    if(x->buffer){
-        sysmem_freeptr(x->buffer);
+    if(x->buffersamps){
+        sysmem_freeptr(x->buffersamps);
     }
 }
 

@@ -16,9 +16,7 @@ typedef struct _voice{
     t_sample pan;
     t_sample amplitude;    
     t_sample scan_begin;
-    t_sample scan_end;    
-    //t_sample out_l;
-    //t_sample out_r;
+    t_sample scan_end;
 }t_voice;
 
 typedef struct _stream{
@@ -30,10 +28,13 @@ typedef struct _stream{
 typedef struct _ec2 {
     t_pxobject p_ob;
     t_float samplerate;
-    t_buffer_ref *l_buffer_reference;
+    t_buffer_ref *buffer_reference;
+    t_buffer_obj *buffer_obj;
     t_atom_long buffer_size;
-    t_sample *buffer;
+    t_sample *buffersamps;
     t_atom_long channel_count;
+    t_bool buffer_modified;
+    t_bool no_buffer;
     
     t_sample *tukey;
     t_sample *expodec;
@@ -50,10 +51,6 @@ typedef struct _ec2 {
     t_bool init;
     t_sample scan_count;
     t_atom_long testcounter;
-    
-    t_bool buffer_modified;
-    t_bool no_buffer;
-    t_buffer_obj *buffer_obj;
     
     short count[9];
     t_atom_long input_count;
@@ -99,11 +96,11 @@ void ec2_buffer_limits(t_ec2 *x){
         x->buffer_size      = buffer_getframecount(x->buffer_obj)-1;
         x->channel_count    = buffer_getchannelcount(x->buffer_obj);
         
-        if(x->buffer){
-            sysmem_freeptr(x->buffer);
+        if(x->buffersamps){
+            sysmem_freeptr(x->buffersamps);
         }
         
-        x->buffer = (t_sample *)sysmem_newptr(x->buffer_size * sizeof(t_sample));
+        x->buffersamps = (t_sample *)sysmem_newptr(x->buffer_size * sizeof(t_sample));
         t_float *buffersamps = buffer_locksamples(x->buffer_obj);
         
         if(!buffersamps){
@@ -111,10 +108,12 @@ void ec2_buffer_limits(t_ec2 *x){
         }
         
         for(long i=0;i<x->buffer_size;i++){
-            x->buffer[i] = (t_sample)buffersamps[i];
+            x->buffersamps[i] = (t_sample)buffersamps[i];
         }
         
         buffer_unlocksamples(x->buffer_obj);
+    }else{
+        post("can\'t get buffer reference");
     }
 }
 
@@ -122,13 +121,13 @@ void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
     t_symbol *name;
     name = (ac)?atom_getsym(av):gensym("");
     
-    if(!x->l_buffer_reference){
-        x->l_buffer_reference = buffer_ref_new((t_object *)x, name);
+    if(!x->buffer_reference){
+        x->buffer_reference = buffer_ref_new((t_object *)x, name);
     }else{
-        buffer_ref_set(x->l_buffer_reference, name);
+        buffer_ref_set(x->buffer_reference, name);
     }
     
-    if((x->buffer_obj = buffer_ref_getobject(x->l_buffer_reference))==NULL){
+    if((x->buffer_obj = buffer_ref_getobject(x->buffer_reference))==NULL){
         post("Buffer %s probably doesn't exist.", name->s_name);
         x->no_buffer = TRUE;
     }else{
@@ -138,18 +137,18 @@ void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
 }
 
 void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
-    defer(x, (method)ec2_doset, s, ac, av);
+    defer_low(x, (method)ec2_doset, s, ac, av);
 }
 
 void ec2_dblclick(t_ec2 *x){
-    buffer_view(buffer_ref_getobject(x->l_buffer_reference));
+    buffer_view(buffer_ref_getobject(x->buffer_reference));
 }
 
 t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data){
     if(msg==ps_buffer_modified){
         x->buffer_modified = TRUE;
     }
-    return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
+    return buffer_ref_notify(x->buffer_reference, s, msg, sender, data);
 }
 
 
