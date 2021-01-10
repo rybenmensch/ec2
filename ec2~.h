@@ -63,10 +63,6 @@ void *ec2_new(t_symbol *s,  long argc, t_atom *argv);
 void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
-long ec2_inputchanged(t_ec2 *x, long index, long count);
-long ec2_multichanneloutputs(t_ec2 *x, long index);
-
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
 void ec2_buffer_limits(t_ec2 *x){
@@ -129,6 +125,31 @@ t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *d
         x->buffer_modified = TRUE;
     }
     return buffer_ref_notify(x->buffer_reference, s, msg, sender, data);
+}
+
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
+    x->samplerate = sys_getsr();
+    sysmem_copyptr(count, x->count, 9*sizeof(short));
+    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
+    object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
+}
+
+long ec2_inputchanged(t_ec2 *x, long index, long count){
+    if(index == 0){
+        if(count != x->input_count){
+            x->input_count = CLAMP(count, 1, x->total_streams);
+            x->active_streams = x->input_count;
+            return true;
+        }else{
+            return false;
+        }
+    }else{
+        return false;
+    }
+}
+
+long ec2_multichanneloutputs(t_ec2 *x, long index){
+    return x->active_streams;
 }
 
 #endif /* ec2__h */

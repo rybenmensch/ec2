@@ -5,6 +5,7 @@
 //OPTIMIZATION THOUGHTS
 //apparently it's faster if there are no functions in for loops, so check that out
 
+//fmod is expensive apparently
 //t_sample mfmod(t_sample x, t_sample y){double a;a=x/y;a-=(int)a; return a*y;}
 //as a replacement for fmod?
 //or comparison if over threshold and then reset?
@@ -17,6 +18,8 @@
 
 //could this be faster?
 //playback_rate   = (count[1]*playback_rate)+(count[1]*1);
+
+//playback and window without functions
 //OPTIMIZE LAST...
 
 void ext_main(void *r){
@@ -92,27 +95,28 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     return (x);
 }
 
-t_sample window(t_ec2 *x, t_atom_long voice_index){
+t_sample window(t_ec2 *x, t_voice *v, t_stream *s){
     //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
     //window determines the "life time" of a single grain!
-    t_atom_long v_i = voice_index;
-    t_sample window_phase = x->voices[v_i].window_phase;
-    window_phase += x->voices[v_i].window_increment;
-    x->voices[v_i].window_phase = window_phase;
-
-    if(window_phase>=x->window_size){
-        x->voices[v_i].is_active = FALSE;
-        x->active_voices--;
+    t_sample window_phase = v->window_phase;
+    window_phase += v->window_increment;
+    v->window_phase = window_phase;
+    
+    if(window_phase >= x->window_size){
+        v->is_active = FALSE;
+        //x->active_voices--;
+        //has to decrease the amount of voices PER STREAM
+        s->active_voices--;
         return 0;
     }
-
+    
     t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
     t_sample expo       = peek(x->expodec, x->window_size, window_phase);
     t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
-    t_sample env_shape  = x->voices[v_i].envelope_shape;
+    t_sample env_shape  = v->envelope_shape;
 
     t_sample interp = 0;
-    if(env_shape <0.5){
+    if(env_shape<0.5){
         interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
     }else if(env_shape==0.5){
         interp = tuk;
@@ -124,20 +128,19 @@ t_sample window(t_ec2 *x, t_atom_long voice_index){
     return interp;
 }
 
-t_sample playback(t_ec2 *x, t_atom_long voice_index){
-    t_sample play_phase     = x->voices[voice_index].play_phase;
-    t_sample scan_begin     = x->voices[voice_index].scan_begin;
-    t_sample scan_end       = x->voices[voice_index].scan_end;
-    t_sample playback_rate  = x->voices[voice_index].playback_rate;
-
-    play_phase += playback_rate;
-    //loop between 0 and scan_end, then add the offset for scan_begin when peeking
-    //overflow
-    play_phase = fmod(play_phase, scan_end+1);  //are we off-by-one? *shrug*
-    //underflow
-    play_phase = (play_phase<0.)?scan_end:play_phase;
-    x->voices[voice_index].play_phase = play_phase;
-    t_sample peek_point = fmod(play_phase+scan_begin, scan_end);    //vorher, nachher?
+t_sample playback(t_ec2 *x, t_voice *v){
+    t_sample play_phase     = v->play_phase;
+    t_sample scan_begin     = v->scan_begin;
+    t_sample scan_end       = v->scan_end;
+    t_sample playback_rate  = v->playback_rate;
+    
+    play_phase  += playback_rate;
+    play_phase  = fmod(play_phase, scan_end+1);
+    play_phase  = (play_phase<0.)?scan_end:play_phase;
+    
+    v->play_phase = play_phase;
+    
+    t_sample peek_point = fmod(play_phase+scan_begin, scan_end);
     t_sample sample = peek(x->buffersamps, x->buffer_size, peek_point);
     return sample;
 }
@@ -147,41 +150,12 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index){
  als trigger-eingang multikanal-eingang
  anzahl der mc-channels gibt anzahl der streams (mit cap)
  danach kann man die clock parallel laufen lassen
- vielleicht auch einen mc-kanal pro stream?
  */
 
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
-    x->samplerate = sys_getsr();
-    sysmem_copyptr(count, x->count, 9*sizeof(short));
-    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
-    object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
-}
-
-long ec2_inputchanged(t_ec2 *x, long index, long count){
-    if(index == 0){
-        if(count != x->input_count){
-            x->input_count = CLAMP(count, 1, x->total_streams);
-            x->active_streams = x->input_count;
-            return true;
-        }else{
-            return false;
-        }
-    }else{
-        return false;
-    }
-}
-
-long ec2_multichanneloutputs(t_ec2 *x, long index){
-    return x->active_streams;
-}
-
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
-    //t_atom_long total_streams = x->total_streams;
     t_atom_long total_voices = x->total_voices;
     t_atom_long active_streams  = x->active_streams;
     
-    //p_trig zeigt fehlerhaft auf inlets 0, 1 und 2
-    //und ignoriert die mc-channels auf inlet 0
     t_sample *p_trig[active_streams];
     for(int i=0;i<active_streams;i++){
         p_trig[i] = ins[i];
@@ -222,7 +196,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     short count[9];
     //try later if this will work or not
     //sysmem_copyptr(x->count, count, 9*sizeof(short));
-    
     for(int i=0;i<9;i++){
         count[i] = x->count[i];
     }
@@ -266,18 +239,17 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         scan_count = (scan_count<0)?scan_range:scan_count;
         scan_end = fmod(scan_range + scan_begin, buffer_size+1);
         
-        for(int current_stream=0;current_stream<active_streams;current_stream++){
-            t_stream *stream = &x->streams[current_stream];
+        for(int i_stream=0;i_stream<active_streams;i_stream++){
+            t_stream *current_stream = &x->streams[i_stream];
             t_atom_long stream_new_index = 0;
 
-            if(trig_arr[current_stream]>0.){
-                if(stream->active_voices<x->total_voices){
-                /////put this in a function maybe?
-                    stream->active_voices++;
+            if(trig_arr[i_stream]>0.){
+                if(current_stream->active_voices < x->total_voices){
+                    current_stream->active_voices++;
                     for(int j=0;j<x->total_voices;j++){
-                        if(stream->voices[j].is_active){
+                        if(current_stream->voices[j].is_active == FALSE){
                             stream_new_index = j;
-                            stream->voices[j].is_active = TRUE;
+                            current_stream->voices[j].is_active = TRUE;
                             break;
                         }
                     }
@@ -288,63 +260,54 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                     
                     window_increment = ((t_sample) (window_size))/grain_duration;
                     
-                    stream->voices[stream_new_index].scan_begin        = scan_begin;
-                    stream->voices[stream_new_index].scan_end          = scan_end;
-                    stream->voices[stream_new_index].playback_rate     = playback_rate;
-                    stream->voices[stream_new_index].envelope_shape    = CLAMP(envelope_shape, 0, 1);
-                    stream->voices[stream_new_index].pan               = CLAMP(pan, -1, 1);
-                    stream->voices[stream_new_index].amplitude         = CLAMP(amplitude, 0, 1);
-                    stream->voices[stream_new_index].window_increment  = window_increment;
+                    current_stream->voices[stream_new_index].scan_begin        = scan_begin;
+                    current_stream->voices[stream_new_index].scan_end          = scan_end;
+                    current_stream->voices[stream_new_index].playback_rate     = playback_rate;
+                    current_stream->voices[stream_new_index].envelope_shape    = CLAMP(envelope_shape, 0, 1);
+                    current_stream->voices[stream_new_index].pan               = CLAMP(pan, -1, 1);
+                    current_stream->voices[stream_new_index].amplitude         = CLAMP(amplitude, 0, 1);
+                    current_stream->voices[stream_new_index].window_increment  = window_increment;
                     
-                    stream->voices[stream_new_index].window_phase      = 0;
-                    stream->voices[stream_new_index].play_phase        = starting_point;
-                }/////end of function?
+                    current_stream->voices[stream_new_index].window_phase      = 0;
+                    current_stream->voices[stream_new_index].play_phase        = starting_point;
+                }
             }
         }
-        for(int i=0;i<active_streams;i++){
-            *numbers_out[i]++   = x->streams[i].active_voices;
-        }
-        
-        /*
-        //PLAYBACK
-        t_sample accum_l = 0;
-        t_sample accum_r = 0;
 
-        t_sample w_accum = 0;
-        for(int i=0;i<x->total_voices;i++){
-            if(x->voices[i].is_active == TRUE){
-                t_sample windowsamp = window(x, i);
-                w_accum += windowsamp;
+        for(int i_stream=0;i_stream<active_streams;i_stream++){
+            t_sample accum_l = 0;
+            t_sample accum_r = 0;
+            
+            t_stream *current_stream = &x->streams[i_stream];
+            
+            for(int i=0;i<x->total_voices;i++){
+                if(current_stream->voices[i].is_active == TRUE){
+                    t_voice *v = &(current_stream->voices[i]);
+                    //kinda dumb that we need to pass stream and voice
+                    //think of something less dumb later
+                    t_sample windowsamp     = window(x, v, current_stream);
 
-                t_sample playbacksamp = playback(x, i);
-                playbacksamp *= windowsamp;
-                playbacksamp *= x->voices[i].amplitude;
-                playbacksamp *= (t_sample) 1./x->total_voices;
-                //normalizing for now until I come up with something smarter
-                accum += playbacksamp;
-
-                t_sample pan_l, pan_r;
-                cospan(playbacksamp, x->voices[i].pan, &pan_l, &pan_r);
-                accum_l += pan_l;
-                accum_r += pan_r;
+                    //t_sample windowsamp     = window(x, &(current_stream->voices[i]), current_stream);
+                    t_sample playbacksamp   = playback(x, v);
+                    
+                    playbacksamp *= windowsamp;
+                    playbacksamp *= v->amplitude;
+                    //normalization by total amount of voices
+                    playbacksamp *= (t_sample)1./x->total_voices;
+                    t_sample pan_l, pan_r;
+                    cospan(playbacksamp, v->pan, &pan_l, &pan_r);
+                    accum_l += pan_l;
+                    accum_r += pan_r;
+                }
             }
+
+            *numbers_out[i_stream]++    = x->streams[i_stream].active_voices;
+            *out_l[i_stream]++          = FIX_DENORM_NAN_SAMPLE(accum_l);
+            *out_r[i_stream]++          = FIX_DENORM_NAN_SAMPLE(accum_r);
         }
         
-        *out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
-        *out_r++ = FIX_DENORM_NAN_SAMPLE(accum_r);
-
-        //single channel output of active voices
-        *debug1++ = x->active_voices;
-        *debug2++ = (t_sample)(mfmod(scan_count + scan_begin, x->buffer_size+1))/x->buffer_size;
-        *debug3++ = (t_sample)scan_begin/x->buffer_size;
-        *debug4++ = (t_sample)scan_end/x->buffer_size;
-
-        for(int i=0;i<x->total_voices;i++){
-            *mc_outs[i]++ = x->voices[i].is_active;
-        }
         //reassign cached values that update sample wise HERE:
         x->scan_count = scan_count;
-        */
     }
     
     //reassign cached values that update in block size HERE:
