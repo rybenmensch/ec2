@@ -3,6 +3,10 @@
 
 /***DSP HELPER FUNCTIONS LIFTED STRAIGHT FROM GEN***/
 
+extern inline t_sample linear_interp(t_sample a, t_sample x, t_sample y) {
+    return x+a*(y-x);
+}
+
 extern inline t_sample phasewrap(t_sample val) {
     const t_sample twopi = TWOPI;
     const t_sample oneovertwopi = 1./twopi;

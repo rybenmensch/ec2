@@ -285,42 +285,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
             }
         }
         
-        /*
-        t_atom_long new_index = 0;
-        if(trig>0.){
-            //VOICE ALLOCATION
-            if(x->active_voices<x->total_voices){
-                x->active_voices++;
-                for(int i=0;i<x->total_voices;i++){
-                    if(x->voices[i].is_active==FALSE){
-                        new_index = i;
-                        x->voices[i].is_active = TRUE;
-                        break;
-                    }
-                }
-
-                //got our voice, fill in the data
-
-                starting_point = fmod(scan_count + scan_begin, x->buffer_size+1);
-                grain_duration *= (x->samplerate/1000.);
-
-                t_sample window_size = x->window_size;
-                window_increment = ((t_sample) (window_size))/grain_duration;
-
-                x->voices[new_index].scan_begin = scan_begin;
-                x->voices[new_index].scan_end = scan_end;
-                x->voices[new_index].playback_rate = playback_rate;
-                x->voices[new_index].envelope_shape = CLAMP(envelope_shape, 0, 1);
-                x->voices[new_index].pan = CLAMP(pan, -1, 1);
-                x->voices[new_index].amplitude = CLAMP(amplitude, 0, 1);
-                x->voices[new_index].window_increment = window_increment;
-
-                x->voices[new_index].window_phase = 0;
-                x->voices[new_index].play_phase = starting_point;
-            }
-        }
-        */
-        
         //MC STREAMS PLAYBACK
         //cache total_streams;
         t_sample accum_l[x->total_streams];
