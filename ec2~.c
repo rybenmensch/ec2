@@ -27,11 +27,9 @@ void ext_main(void *r){
     class_addmethod(c, (method)ec2_assist, "assist", A_CANT, 0);
     class_addmethod(c, (method)ec2_dblclick, "dblclick", A_CANT, 0);
     class_addmethod(c, (method)ec2_notify, "notify", A_CANT, 0);
-    //class_addmethod(c, (method)ec2_set, "set", A_SYM, 0);
     class_addmethod(c, (method)ec2_set, "set", A_GIMME, 0);
     class_addmethod(c, (method)ec2_multichanneloutputs, "multichanneloutputs", A_CANT, 0);
     class_addmethod(c, (method)ec2_inputchanged, "inputchanged", A_CANT, 0);
-
 
     class_dspinit(c);
     class_register(CLASS_BOX, c);
@@ -43,10 +41,11 @@ void ext_main(void *r){
 void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     t_ec2 *x = (t_ec2 *)object_alloc(ec2_class);
     dsp_setup((t_pxobject * )x, 9);
-    outlet_new((t_object *)x, "multichannelsignal");
-
-    for(int i=0;i<6;i++){
-        outlet_new((t_object *)x, "signal");
+    x->p_ob.z_misc = Z_MC_INLETS;
+    
+    //l out (mc), r out (mc), active voices per stream (mc)
+    for(int i=0;i<3;i++){
+        outlet_new((t_object *)x, "multichannelsignal");
     }
 
     x->window_size = 512;
@@ -61,17 +60,9 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
 
     x->total_streams = 12;
     x->active_streams = 1;
-    
-    /*
-    x->voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
-    for(int i=0;i<x->total_voices;i++){
-        x->voices[i].is_active = 0;
-        x->voices[i].play_phase = 0.;
-        x->voices[i].window_phase = 0.;
-    }
-    */
-     
-    x->streams = (t_stream *)sysmem_newptr(x->total_streams * sizeof(t_voice));
+
+    x->streams = (t_stream *)sysmem_newptr(x->total_streams * sizeof(t_stream));
+
     for(int i=0;i<x->total_streams;i++){
         x->streams[i].is_active = (i==0);   //activate first stream only
         x->streams[i].active_voices = 0;
@@ -159,15 +150,38 @@ t_sample playback(t_ec2 *x, t_atom_long voice_index){
  vielleicht auch einen mc-kanal pro stream?
  */
 
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
+    x->samplerate = sys_getsr();
+    sysmem_copyptr(count, x->count, 9*sizeof(short));
+    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
+    object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
+}
+
+long ec2_inputchanged(t_ec2 *x, long index, long count){
+    if(index == 0){
+        if(count != x->input_count){
+            x->input_count = CLAMP(count, 1, x->total_streams);
+            x->active_streams = x->input_count;
+            return true;
+        }else{
+            return false;
+        }
+    }else{
+        return false;
+    }
+}
+
+long ec2_multichanneloutputs(t_ec2 *x, long index){
+    return x->active_streams;
+}
+
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
-    t_atom_long total_streams = x->total_streams;
+    //t_atom_long total_streams = x->total_streams;
     t_atom_long total_voices = x->total_voices;
-    /*
-    t_atom_long active_streams = x->active_streams;
-    active_streams = CLAMP(x->input_count, 1, total_streams);
-    */
-    t_atom_long active_streams = CLAMP(x->input_count, 1, total_streams);
+    t_atom_long active_streams  = x->active_streams;
     
+    //p_trig zeigt fehlerhaft auf inlets 0, 1 und 2
+    //und ignoriert die mc-channels auf inlet 0
     t_sample *p_trig[active_streams];
     for(int i=0;i<active_streams;i++){
         p_trig[i] = ins[i];
@@ -182,16 +196,13 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_sample *p_pan             = ins[active_streams+6];
     t_sample *p_amplitude       = ins[active_streams+7];
 
-    t_sample *out_l             = outs[0];
-    t_sample *out_r             = outs[1];
-    t_sample *debug1            = outs[2];
-    t_sample *debug2            = outs[3];
-    t_sample *debug3            = outs[4];
-    t_sample *debug4            = outs[5];
-
-    t_sample *mc_outs[total_voices];
-    for(int i=0;i<total_voices;i++){
-        mc_outs[i] = outs[i+6];
+    t_sample *out_l[active_streams];
+    t_sample *out_r[active_streams];
+    t_sample *numbers_out[total_voices];
+    for(int i=0;i<active_streams;i++){
+        out_l[i]        = outs[i];
+        out_r[i]        = outs[i+active_streams];
+        numbers_out[i]  = outs[i+active_streams*2];
     }
 
     if(x->no_buffer){
@@ -207,12 +218,17 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_atom_long buffer_size = x->buffer_size;
     t_atom_long window_size = x->window_size;
     t_float samplerate      = x->samplerate;
+    
     short count[9];
-    sysmem_copyptr(x->count, count, 9*sizeof(short));
+    //try later if this will work or not
+    //sysmem_copyptr(x->count, count, 9*sizeof(short));
+    
+    for(int i=0;i<9;i++){
+        count[i] = x->count[i];
+    }
     
     //we'll have to handle amount of channels later
     //multiply the index by the amount of channels that there are
- 
     while(n--){
         t_sample trig_arr[active_streams];
         t_sample playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude;
@@ -222,16 +238,17 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         for(int i=0;i<active_streams;i++){
             trig_arr[i] = *(p_trig[i])++;
         }
-        playback_rate   = *p_playback_rate++;   playback_rate   = (x->count[1])?playback_rate:1.;
-        scan_begin      = *p_scan_begin++;      scan_begin      = (x->count[2])?scan_begin:0.;
-        scan_range      = *p_scan_range++;      scan_range      = (x->count[3])?scan_range:1.;
-        scan_speed      = *p_scan_speed++;      scan_speed      = (x->count[4])?scan_speed:1.;
-        grain_duration  = *p_grain_duration++;  grain_duration  = (x->count[5])?grain_duration:100;
-        envelope_shape  = *p_envelope_shape++;  envelope_shape  = (x->count[6])?envelope_shape:0.5;
-        pan             = *p_pan++;             pan             = (x->count[7])?pan:0.;
-        amplitude       = *p_amplitude++;       amplitude       = (x->count[8])?amplitude:1.;
+
+         playback_rate   = *p_playback_rate++;   playback_rate   = (count[1])?playback_rate:1.;
+         scan_begin      = *p_scan_begin++;      scan_begin      = (count[2])?scan_begin:0.;
+         scan_range      = *p_scan_range++;      scan_range      = (count[3])?scan_range:1.;
+         scan_speed      = *p_scan_speed++;      scan_speed      = (count[4])?scan_speed:1.;
+         grain_duration  = *p_grain_duration++;  grain_duration  = (count[5])?grain_duration:100;
+         envelope_shape  = *p_envelope_shape++;  envelope_shape  = (count[6])?envelope_shape:0.5;
+         pan             = *p_pan++;             pan             = (count[7])?pan:0.;
+         amplitude       = *p_amplitude++;       amplitude       = (count[8])?amplitude:1.;
         
-        //COUNTER
+        //SCANNER
         scan_count = x->scan_count;
         if(x->init){
             scan_count = scan_begin;
@@ -284,12 +301,10 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 }/////end of function?
             }
         }
+        for(int i=0;i<active_streams;i++){
+            *numbers_out[i]++   = x->streams[i].active_voices;
+        }
         
-        //MC STREAMS PLAYBACK
-        //cache total_streams;
-        t_sample accum_l[x->total_streams];
-        t_sample accum_r[x->total_streams];
-        t_sample w_accum[x->total_streams];
         /*
         //PLAYBACK
         t_sample accum_l = 0;
@@ -327,9 +342,9 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         for(int i=0;i<x->total_voices;i++){
             *mc_outs[i]++ = x->voices[i].is_active;
         }
-        */
         //reassign cached values that update sample wise HERE:
         x->scan_count = scan_count;
+        */
     }
     
     //reassign cached values that update in block size HERE:
@@ -340,8 +355,6 @@ zero:
         set_zero64(outs[i], sampleframes);
     }
 }
-
-/***HOUSEKEEPING***/
 
 void ec2_free(t_ec2 *x){
     dsp_free((t_pxobject *)x);
@@ -414,18 +427,3 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s){
         }
     }
 }
-/*
-void voice_and_param(t_ec2 *x, t_sample ***ins_p){
-    //use this function when we're sure that everything else is working maybe
-    //get a single sample and increment the pointer ayyyy
-    t_sample trig           = *(*((*ins_p)+0))++;
-    t_sample playback_rate  = *(*((*ins_p)+1))++;
-    t_sample scan_begin     = *(*((*ins_p)+2))++;
-    t_sample scan_range     = *(*((*ins_p)+3))++;
-    t_sample scan_speed     = *(*((*ins_p)+4))++;
-    t_sample grain_duration = *(*((*ins_p)+5))++;
-    t_sample envelope_shape = *(*((*ins_p)+6))++;
-    t_sample pan            = *(*((*ins_p)+7))++;
-    t_sample amplitude      = *(*((*ins_p)+8))++;
-}
- */

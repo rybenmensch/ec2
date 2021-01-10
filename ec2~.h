@@ -63,32 +63,11 @@ void *ec2_new(t_symbol *s,  long argc, t_atom *argv);
 void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
+long ec2_inputchanged(t_ec2 *x, long index, long count);
+long ec2_multichanneloutputs(t_ec2 *x, long index);
+
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-
-long ec2_inputchanged(t_ec2 *x, long index, long count){
-    if(count != x->input_count){
-        post("number of channels has changed from %ld to %ld", x->input_count, count);
-        x->input_count = count;
-        return TRUE;
-    }else{
-        return FALSE;
-    }
-}
-
-long ec2_multichanneloutputs(t_ec2 *x, long index){
-    if(6==index){
-        return x->total_voices;
-    }else{
-        return 1;
-    }
-}
-
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
-    x->samplerate = sys_getsr();
-    sysmem_copyptr(count, x->count, 9*sizeof(short));
-    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
-    object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
-}
 
 void ec2_buffer_limits(t_ec2 *x){
     //get dimensions etc here so that we don't have to do that in the perform routine
@@ -151,7 +130,5 @@ t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *d
     }
     return buffer_ref_notify(x->buffer_reference, s, msg, sender, data);
 }
-
-
 
 #endif /* ec2__h */
