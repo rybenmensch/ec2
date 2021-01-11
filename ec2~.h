@@ -104,7 +104,7 @@ void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
     }
     
     if((x->buffer_obj = buffer_ref_getobject(x->buffer_reference))==NULL){
-        post("Buffer %s probably doesn't exist.", name->s_name);
+        error("Buffer %s probably doesn't exist.", name->s_name);
         x->no_buffer = TRUE;
     }else{
         x->no_buffer = FALSE;
