@@ -12,15 +12,23 @@
 
 //calculating expo and tukey instead of LUT?
 
-//fast cos in panning function? maybe not as gen~ itself doesn't do that in the exported cospan.gendsp
-
 //assign defaults/some things in general at block rate?
 
 //could this be faster?
 //playback_rate   = (count[1]*playback_rate)+(count[1]*1);
 
 //playback and window without functions
+
 //OPTIMIZE LAST...
+
+/*
+ TODO BEFORE OPTIMIZATIONS:
+ - bufferhandling for external window functions :(
+ - reading/writing into multi-channel-buffers
+ - choose better exponentials
+ - sound wise? reverb oder so
+ - sometimes, certain voices aren't released but just decay veeery slowly
+ */
 
 void ext_main(void *r){
     t_class *c;
@@ -104,8 +112,6 @@ t_sample window(t_ec2 *x, t_voice *v, t_stream *s){
     
     if(window_phase >= x->window_size){
         v->is_active = FALSE;
-        //x->active_voices--;
-        //has to decrease the amount of voices PER STREAM
         s->active_voices--;
         return 0;
     }
@@ -286,8 +292,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                     //kinda dumb that we need to pass stream and voice
                     //think of something less dumb later
                     t_sample windowsamp     = window(x, v, current_stream);
-
-                    //t_sample windowsamp     = window(x, &(current_stream->voices[i]), current_stream);
                     t_sample playbacksamp   = playback(x, v);
                     
                     playbacksamp *= windowsamp;
@@ -301,11 +305,10 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 }
             }
 
-            *numbers_out[i_stream]++    = x->streams[i_stream].active_voices;
             *out_l[i_stream]++          = FIX_DENORM_NAN_SAMPLE(accum_l);
             *out_r[i_stream]++          = FIX_DENORM_NAN_SAMPLE(accum_r);
+            *numbers_out[i_stream]++    = x->streams[i_stream].active_voices;
         }
-        
         //reassign cached values that update sample wise HERE:
         x->scan_count = scan_count;
     }
