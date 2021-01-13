@@ -74,6 +74,43 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
+void ec2_window_ext_calc(t_ec2 *x){
+    t_atom_long framecount  = buffer_getframecount(x->window_ext_obj);
+    t_atom_long chans       = buffer_getchannelcount(x->window_ext_obj);
+    t_float *buffersamps    = buffer_locksamples(x->window_ext_obj);
+
+    if(x->window_ext_samps){
+        sysmem_freeptr(x->window_ext_samps);
+    }
+    
+    x->window_ext_samps = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
+    
+    if(framecount==512){
+        for(long i=0;i<x->window_size;i++){
+            long index = chans*i;
+            x->window_ext_samps[i] = (t_sample)buffersamps[index];
+        }
+    }else{
+        t_sample temp_buffer[framecount];
+        
+        for(long i=0;i<framecount;i++){
+            temp_buffer[i] = (t_sample)buffersamps[i];
+        }
+        //t_sample factor = (t_sample)x->window_size/(t_sample)framecount;
+        t_sample factor = (t_sample)framecount/(t_sample)x->window_size;
+
+        t_sample index_accum = 0;
+        for(long i=0;i<x->window_size;i++){
+            t_sample samp = peek(temp_buffer, framecount-1, index_accum);
+            x->window_ext_samps[i] = samp;
+            index_accum += factor;
+        }
+    }
+    
+    x->window_type = EXTERNAL;
+    buffer_unlocksamples(x->window_ext_obj);
+}
+
 void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
     t_symbol *name;
     name = (ac)?atom_getsym(av):gensym("");
@@ -87,42 +124,8 @@ void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
         error("Buffer %s probably doesn't exist.", name->s_name);
         return;
     }else{
-        t_atom_long framecount  = buffer_getframecount(x->window_ext_obj);
-        t_atom_long chans       = buffer_getchannelcount(x->window_ext_obj);
-        t_float *buffersamps    = buffer_locksamples(x->window_ext_obj);
-        post("%ld", framecount);
-
-        if(x->window_ext_samps){
-            sysmem_freeptr(x->window_ext_samps);
-        }
-        
-        x->window_ext_samps = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
-        
-        if(framecount==512){
-            for(long i=0;i<x->window_size;i++){
-                long index = chans*i;
-                x->window_ext_samps[i] = (t_sample)buffersamps[index];
-            }
-        }else{
-            t_sample temp_buffer[framecount];
-            
-            for(long i=0;i<framecount;i++){
-                temp_buffer[i] = (t_sample)buffersamps[i];
-            }
-            //t_sample factor = (t_sample)x->window_size/(t_sample)framecount;
-            t_sample factor = (t_sample)framecount/(t_sample)x->window_size;
-
-            t_sample index_accum = 0;
-            for(long i=0;i<x->window_size;i++){
-                t_sample samp = peek(temp_buffer, framecount-1, index_accum);
-                x->window_ext_samps[i] = samp;
-                index_accum += factor;
-            }
-        }
-        
-        x->window_type = EXTERNAL;
+        ec2_window_ext_calc(x);
     }
-    buffer_unlocksamples(x->window_ext_obj);
 }
 
 void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
@@ -188,7 +191,8 @@ void ec2_dblclick(t_ec2 *x){
 }
 
 t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data){
-    //notify the other buffer too
+    //notify the other buffer too, check out what's in s?
+    post("%s", s->s_name);
     if(msg==ps_buffer_modified){
         x->buffer_modified = TRUE;
     }
@@ -199,7 +203,6 @@ void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long 
     x->samplerate = sys_getsr();
     sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
     
-    //last inlet is external scanner
     if(count[inlet_amount-1]){
         object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64_noscan, 0, NULL);
     }else{

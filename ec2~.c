@@ -22,14 +22,16 @@
 /*
  TODO BEFORE OPTIMIZATIONS:
  BUGS:
+ - crashes sometimes when re-setting the external window buffer
+    => this also affects the regular playback 
  IMPORTANT:
  - extwindow buffer notifying on change
+ - be able to switch back to internal window on-the-fly
  - see how we can clean up the perform loop (put everything into one for loop)
- IDEAS:
- - when amplitude is almost zero, don't trigger a grain?
  NICE-TO-HAVE:
  - second extwindow to be able to interpolate between two buffers (double function of envtype)
  - choose better exponentials - should have the same area under curve as tukey-window to preserve unity gain?
+ - windowed sync interpolation for playback (probably less clicky)
  */
 
 void ext_main(void *r){
