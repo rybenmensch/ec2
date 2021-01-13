@@ -1,6 +1,5 @@
 #include "ec2~.h"
-#include "gen.h"
-#include "mydsp.h"
+
 
 //OPTIMIZATION THOUGHTS
 //apparently it's faster if there are no functions in for loops, so check that out
@@ -20,19 +19,17 @@
 //playback and window without functions
 //OPTIMIZE LAST...
 
-//SINGLE STREAM: NO MC INPUTS
-
 /*
  TODO BEFORE OPTIMIZATIONS:
  BUGS:
  IMPORTANT:
- - reading/writing into multi-channel-buffers   => DONE, TEST NOW
- - choose better exponentials - should have the same area under curve as tukey-window to preserve unity gain?
+ - extwindow buffer notifying on change
  - see how we can clean up the perform loop (put everything into one for loop)
- - give the option for an external scanner (overriding scan_* inputs,
-    different perform routine if external scanner is connected)
-NICE-TO-HAVE:
- - bufferhandling for external window functions :(
+ IDEAS:
+ - when amplitude is almost zero, don't trigger a grain?
+ NICE-TO-HAVE:
+ - second extwindow to be able to interpolate between two buffers (double function of envtype)
+ - choose better exponentials - should have the same area under curve as tukey-window to preserve unity gain?
  */
 
 void ext_main(void *r){
@@ -44,6 +41,7 @@ void ext_main(void *r){
     class_addmethod(c, (method)ec2_dblclick, "dblclick", A_CANT, 0);
     class_addmethod(c, (method)ec2_notify, "notify", A_CANT, 0);
     class_addmethod(c, (method)ec2_set, "set", A_GIMME, 0);
+    class_addmethod(c, (method)ec2_window_ext, "window_ext", A_GIMME, 0);
     class_addmethod(c, (method)ec2_multichanneloutputs, "multichanneloutputs", A_CANT, 0);
 
     class_dspinit(c);
@@ -56,7 +54,7 @@ void ext_main(void *r){
 void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     t_ec2 *x = (t_ec2 *)object_alloc(ec2_class);
     
-    inlet_amount = 9;
+    inlet_amount = 10;
     x->count = (short*)sysmem_newptr(inlet_amount*sizeof(short));
     
     dsp_setup((t_pxobject * )x, inlet_amount);
@@ -70,7 +68,6 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     }
 
     x->window_size = 512;
-
     x->tukey = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
     x->expodec = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
     x->rexpodec = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
@@ -91,13 +88,14 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->init = TRUE;
     x->samplerate = 44100;
 
-    x->testcounter = 0;
-
     x->buffersamps = NULL;
     x->buffer_modified = TRUE;
     x->buffer_size = 1;
     x->buffer_reference = NULL;
     x->no_buffer = TRUE;
+    
+    x->window_ext_samps = NULL;
+    x->window_type = INTERNAL;
     
     ec2_set(x, s, argc, argv);
     return (x);
@@ -116,22 +114,27 @@ t_sample window(t_ec2 *x, t_voice *v){
         return 0;
     }
     
-    t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
-    t_sample expo       = peek(x->expodec, x->window_size, window_phase);
-    t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
-    t_sample env_shape  = v->envelope_shape;
+    if(x->window_type == INTERNAL){
+        t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
+        t_sample expo       = peek(x->expodec, x->window_size, window_phase);
+        t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
+        t_sample env_shape  = v->envelope_shape;
 
-    t_sample interp = 0;
-    if(env_shape<0.5){
-        interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
-    }else if(env_shape==0.5){
-        interp = tuk;
-    }else if(env_shape<=1.){
-        interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
+        t_sample interp = 0;
+        if(env_shape<0.5){
+            interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
+        }else if(env_shape==0.5){
+            interp = tuk;
+        }else if(env_shape<=1.){
+            interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
+        }else{
+            interp = tuk;
+        }
+        return interp;
     }else{
-        interp = tuk;
+        t_sample samp = peek(x->window_ext_samps, x->window_size, window_phase);
+        return samp;
     }
-    return interp;
 }
 
 t_sample playback(t_ec2 *x, t_voice *v){
@@ -229,7 +232,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         scan_end = fmod(scan_range + scan_begin, buffer_size+1);
         
         t_atom_long new_index = 0;
-        if(trig>0.){
+        if(trig>0. && amplitude!=0){
             if(x->active_voices < x->total_voices){
                 x->active_voices++;
                 for(int i=0;i<x->total_voices;i++){
@@ -301,9 +304,145 @@ zero:
     }
 }
 
+void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
+    t_atom_long total_voices = x->total_voices;
+    
+    t_sample *p_trig            = ins[0];
+    t_sample *p_playback_rate   = ins[1];
+    t_sample *p_scan_begin      = ins[2];
+    t_sample *p_scan_range      = ins[3];
+    t_sample *p_scan_speed      = ins[4];
+    t_sample *p_grain_duration  = ins[5];
+    t_sample *p_envelope_shape  = ins[6];
+    t_sample *p_pan             = ins[7];
+    t_sample *p_amplitude       = ins[8];
+    t_sample *p_scan            = ins[9];
+
+    t_sample *out_l             = outs[0];
+    t_sample *out_r             = outs[1];
+    
+    t_sample *numbers_out[total_voices];
+    for(int i=0;i<total_voices;i++){
+        numbers_out[i]  = outs[i+2];
+    }
+    
+    t_sample *scan_out          = outs[total_voices+2];
+    t_sample *scan_begin_out    = outs[total_voices+3];
+    t_sample *scan_end_out      = outs[total_voices+4];
+
+    short count[inlet_amount];
+    sysmem_copyptr(x->count, count, inlet_amount*sizeof(short));
+    
+    if(x->buffer_modified){
+        ec2_buffer_limits(x);
+        x->buffer_modified = FALSE;
+    }
+    
+     if(x->no_buffer){
+         goto zero;
+     }
+
+    long n=sampleframes;
+    t_atom_long buffer_size = x->buffer_size;
+    t_atom_long window_size = x->window_size;
+    t_float samplerate      = x->samplerate;
+     
+    while(n--){
+        t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude, scan;
+        t_sample starting_point, scan_count, window_increment;
+        
+        //increment all pointers, get all values, if not connected, assign defaults
+        trig            = *p_trig++;
+        playback_rate   = *p_playback_rate++;   playback_rate   = (count[1])?playback_rate:1.;
+        scan_begin      = *p_scan_begin++;      scan_begin      = (count[2])?scan_begin:0.;
+        scan_range      = *p_scan_range++;      scan_range      = (count[3])?scan_range:1.;
+        scan_speed      = *p_scan_speed++;      scan_speed      = (count[4])?scan_speed:1.;
+        grain_duration  = *p_grain_duration++;  grain_duration  = (count[5])?grain_duration:100;
+        envelope_shape  = *p_envelope_shape++;  envelope_shape  = (count[6])?envelope_shape:0.5;
+        pan             = *p_pan++;             pan             = (count[7])?pan:0.;
+        amplitude       = *p_amplitude++;       amplitude       = (count[8])?amplitude:1.;
+        scan            = *p_scan++;            //no default, because if disconnected, the automatic scanner will take over
+        
+        t_atom_long new_index = 0;
+        
+        scan = CLAMP(scan, 0, 1.);
+        
+        if(trig>0. && amplitude!=0.){
+            if(x->active_voices < x->total_voices){
+                x->active_voices++;
+                for(int i=0;i<x->total_voices;i++){
+                    if(x->voices[i].is_active == FALSE){
+                        new_index = i;
+                        x->voices[i].is_active = TRUE;
+                        break;
+                    }
+                }
+                
+                //got our voice, fill in the data
+                starting_point = scan*buffer_size;
+                grain_duration *= (samplerate/1000.);
+                
+                window_increment = ((t_sample) (window_size))/grain_duration;
+                
+                x->voices[new_index].scan_begin        = 0;
+                x->voices[new_index].scan_end          = buffer_size;
+                x->voices[new_index].playback_rate     = playback_rate;
+                x->voices[new_index].envelope_shape    = CLAMP(envelope_shape, 0, 1);
+                x->voices[new_index].pan               = CLAMP(pan, -1, 1);
+                x->voices[new_index].amplitude         = CLAMP(amplitude, 0, 1);
+                x->voices[new_index].window_increment  = window_increment;
+                x->voices[new_index].window_phase      = 0;
+                x->voices[new_index].play_phase        = starting_point;
+            }
+        }
+        
+        t_sample accum_l = 0;
+        t_sample accum_r = 0;
+                
+        for(int i=0;i<x->total_voices;i++){
+            if(x->voices[i].is_active == TRUE){
+                t_voice *v = &(x->voices[i]);
+                t_sample windowsamp     = window(x, v);
+                t_sample playbacksamp   = playback(x, v);
+                
+                playbacksamp *= windowsamp;
+                playbacksamp *= x->voices[i].amplitude;
+                //normalization by total amount of voices
+                playbacksamp *= (t_sample)1./x->total_voices;
+                t_sample pan_l, pan_r;
+                cospan(playbacksamp, v->pan, &pan_l, &pan_r);
+                accum_l += pan_l;
+                accum_r += pan_r;
+            }
+        }
+        
+        *out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
+        *out_r++ = FIX_DENORM_NAN_SAMPLE(accum_r);
+        for(int i=0;i<x->total_voices;i++){
+            t_bool sali = x->voices[i].is_active;
+            *numbers_out[i]++ = sali;
+        }
+
+        *scan_out++ = (t_sample)scan;
+        *scan_begin_out++ = 0;
+        *scan_end_out++ = 1;
+
+        //reassign cached values that update sample wise HERE:
+    }
+    
+    //reassign cached values that update in block size HERE:
+    return;
+zero:
+    for(int i=0;i<numouts;i++){
+        set_zero64(outs[i], sampleframes);
+    }
+}
+
+
 void ec2_free(t_ec2 *x){
     dsp_free((t_pxobject *)x);
     object_free(x->buffer_reference);
+    object_free(x->window_ext_ref);
     if(x->tukey){
         sysmem_freeptr(x->tukey);
     }
@@ -320,6 +459,10 @@ void ec2_free(t_ec2 *x){
     
     if(x->buffersamps){
         sysmem_freeptr(x->buffersamps);
+    }
+    
+    if(x->window_ext_samps){
+        sysmem_freeptr(x->window_ext_samps);
     }
     
     if(x->count){

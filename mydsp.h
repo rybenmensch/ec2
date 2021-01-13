@@ -61,34 +61,5 @@ extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
      */
 }
 
-extern void calculate_windows(t_ec2 *x){
-    t_atom_long size = x->window_size-1;
-    
-    //CALCULATE TUKEY
-    t_sample alpha = 0.5;
-    t_sample anm12 = 0.5*alpha*size;
-    
-    for(int i=0;i<size+1;i++){
-        t_sample val = 0;
-        if(i<=anm12){
-            val = 0.5*(1+cos(PI*(i/anm12 - 1)));
-        }else if(i<size*(1-0.5*alpha)){
-            val = 1;
-        }else{
-            val = 0.5*(1+cosf(PI*(i/anm12 - 2/alpha + 1)));
-        }
-        x->tukey[i] = val;
-    }
-    
-    //CALCULATE (R)EXPODEC
-    for(int i=0;i<size+1;i++){
-        t_sample phase = (float)i/size;
-        //experimental value
-        t_sample a = 36;
-        t_sample val = (powf(a, phase)-1)/(a-1);
-        x->expodec[size-i] = val;
-        x->rexpodec[i] = val;
-    }
-}
 
 #endif /* mydsp_h */
