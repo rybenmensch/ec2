@@ -20,7 +20,7 @@ typedef struct _voice{
 }t_voice;
 
 typedef struct _stream{
-    t_bool is_active;
+    t_bool is_active;   //potentially unneeded
     t_atom_long active_voices;
     t_voice *voices;
 }t_stream;
@@ -43,27 +43,26 @@ typedef struct _ec2 {
     
     t_atom_long total_voices;
     t_atom_long active_voices;
-    t_atom_long total_streams;
-    t_atom_long active_streams;
     t_voice *voices;
-    t_stream *streams;
     
     t_bool init;
     t_sample scan_count;
     t_atom_long testcounter;
     
-    short count[9];
-    t_atom_long input_count;
+    short *count;
 } t_ec2;
 
 t_symbol *ps_buffer_modified;
 t_class *ec2_class;
+
+t_atom_long inlet_amount;
 
 void *ec2_new(t_symbol *s,  long argc, t_atom *argv);
 void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
+void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
 void ec2_buffer_limits(t_ec2 *x){
     //get dimensions etc here so that we don't have to do that in the perform routine
@@ -84,7 +83,9 @@ void ec2_buffer_limits(t_ec2 *x){
         }
         
         for(long i=0;i<=x->buffer_size;i++){
-            x->buffersamps[i] = (t_sample)buffersamps[i];
+            //just skip according to channel_count
+            long index = x->channel_count*i;
+            x->buffersamps[i] = (t_sample)buffersamps[index];
         }
         
         buffer_unlocksamples(x->buffer_obj);
@@ -129,27 +130,18 @@ t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *d
 
 void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
     x->samplerate = sys_getsr();
-    sysmem_copyptr(count, x->count, 9*sizeof(short));
-    x->input_count = (t_atom_long)object_method(dsp64, gensym("getnuminputchannels"), x, 0);
+    sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
     object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
 }
 
-long ec2_inputchanged(t_ec2 *x, long index, long count){
-    if(index == 0){
-        if(count != x->input_count){
-            x->input_count = CLAMP(count, 1, x->total_streams);
-            x->active_streams = x->input_count;
-            return true;
-        }else{
-            return false;
-        }
-    }else{
-        return false;
-    }
-}
-
 long ec2_multichanneloutputs(t_ec2 *x, long index){
-    return x->active_streams;
+    if(3==index){
+        return 3;
+    }if(2==index){
+        return x->total_voices;
+    }else{
+        return 1;
+    }
 }
 
 #endif /* ec2__h */
