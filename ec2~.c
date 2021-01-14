@@ -1,5 +1,24 @@
-#include "ec2~.h"
+/*
+EC2CLONE
+Copyright (C) Manolo Müller, 2020
+ 
+This file is part of EC2CLONE.
 
+Foobar is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Foobar is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+#include "ec2~.h"
 
 //OPTIMIZATION THOUGHTS
 //apparently it's faster if there are no functions in for loops, so check that out
@@ -23,7 +42,7 @@
  TODO BEFORE OPTIMIZATIONS:
  BUGS:
  - crashes sometimes when re-setting the external window buffer
-    => this also affects the regular playback 
+    => this also affects the regular playback
  IMPORTANT:
  - extwindow buffer notifying on change
  - be able to switch back to internal window on-the-fly
@@ -32,6 +51,7 @@
  - second extwindow to be able to interpolate between two buffers (double function of envtype)
  - choose better exponentials - should have the same area under curve as tukey-window to preserve unity gain?
  - windowed sync interpolation for playback (probably less clicky)
+ - copyright? genlib doesn't have an open source licence
  */
 
 void ext_main(void *r){
@@ -44,6 +64,7 @@ void ext_main(void *r){
     class_addmethod(c, (method)ec2_notify, "notify", A_CANT, 0);
     class_addmethod(c, (method)ec2_set, "set", A_GIMME, 0);
     class_addmethod(c, (method)ec2_window_ext, "window_ext", A_GIMME, 0);
+    class_addmethod(c, (method)ec2_window_type, "window_type", A_SYM, 0);
     class_addmethod(c, (method)ec2_multichanneloutputs, "multichanneloutputs", A_CANT, 0);
 
     class_dspinit(c);
@@ -103,6 +124,24 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     return (x);
 }
 
+//assign a function pointer at block rate?
+t_sample window_ext(t_ec2 *x, t_voice *v){
+    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
+    //window determines the "life time" of a single grain!
+    t_sample window_phase = v->window_phase;
+    window_phase += v->window_increment;
+    v->window_phase = window_phase;
+    
+    if(window_phase >= x->window_size){
+        v->is_active = FALSE;
+        x->active_voices--;
+        return 0;
+    }
+    
+    t_sample samp = peek(x->window_ext_samps, x->window_size, window_phase);
+    return samp;
+}
+
 t_sample window(t_ec2 *x, t_voice *v){
     //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
     //window determines the "life time" of a single grain!
@@ -116,27 +155,22 @@ t_sample window(t_ec2 *x, t_voice *v){
         return 0;
     }
     
-    if(x->window_type == INTERNAL){
-        t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
-        t_sample expo       = peek(x->expodec, x->window_size, window_phase);
-        t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
-        t_sample env_shape  = v->envelope_shape;
-
-        t_sample interp = 0;
-        if(env_shape<0.5){
-            interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
-        }else if(env_shape==0.5){
-            interp = tuk;
-        }else if(env_shape<=1.){
-            interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
-        }else{
-            interp = tuk;
-        }
-        return interp;
+    t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
+    t_sample expo       = peek(x->expodec, x->window_size, window_phase);
+    t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
+    t_sample env_shape  = v->envelope_shape;
+    
+    t_sample interp = 0;
+    if(env_shape<0.5){
+        interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
+    }else if(env_shape==0.5){
+        interp = tuk;
+    }else if(env_shape<=1.){
+        interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
     }else{
-        t_sample samp = peek(x->window_ext_samps, x->window_size, window_phase);
-        return samp;
+        interp = tuk;
     }
+    return interp;
 }
 
 t_sample playback(t_ec2 *x, t_voice *v){
@@ -197,6 +231,9 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_atom_long buffer_size = x->buffer_size;
     t_atom_long window_size = x->window_size;
     t_float samplerate      = x->samplerate;
+    
+    t_sample (*window_ptr)(t_ec2 *x, t_voice *v);
+    window_ptr = (x->window_type)?window_ext:window;
      
     while(n--){
         t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude;
@@ -269,7 +306,8 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
                 t_voice *v = &(x->voices[i]);
-                t_sample windowsamp     = window(x, v);
+                t_sample windowsamp     = (*window_ptr)(x, v);
+                //t_sample windowsamp     = window(x, v);
                 t_sample playbacksamp   = playback(x, v);
                 
                 playbacksamp *= windowsamp;
@@ -348,10 +386,13 @@ void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, 
     t_atom_long buffer_size = x->buffer_size;
     t_atom_long window_size = x->window_size;
     t_float samplerate      = x->samplerate;
-     
+    
+    t_sample (*window_ptr)(t_ec2 *x, t_voice *v);
+    window_ptr = (x->window_type)?window_ext:window;
+    
     while(n--){
         t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude, scan;
-        t_sample starting_point, scan_count, window_increment;
+        t_sample starting_point, window_increment;
         
         //increment all pointers, get all values, if not connected, assign defaults
         trig            = *p_trig++;
@@ -404,7 +445,8 @@ void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, 
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
                 t_voice *v = &(x->voices[i]);
-                t_sample windowsamp     = window(x, v);
+                t_sample windowsamp     = (*window_ptr)(x, v);
+                //t_sample windowsamp     = window(x, v);
                 t_sample playbacksamp   = playback(x, v);
                 
                 playbacksamp *= windowsamp;
@@ -502,20 +544,22 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s){
             case 8:
                 sprintf(s, "(signal) Amplitude (0. - 1.)");
                 break;
+            case 9:
+                sprintf(s, "(signal) External scan position (0. - 1.)");
         }
     }else{
         switch(a){
             case 0:
-                sprintf(s, "(signal) Left output per stream");
+                sprintf(s, "(signal) Left output");
                 break;
             case 1:
-                sprintf(s, "(signal) Right output per stream");
+                sprintf(s, "(signal) Right output");
                 break;
             case 2:
                 sprintf(s, "(mcsignal) Busymap");
                 break;
             case 3:
-                sprintf(s, "(mcsignal) Scan");
+                sprintf(s, "(mcsignal) Scanhead and range");
                 break;
         }
     }

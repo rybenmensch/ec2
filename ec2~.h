@@ -1,3 +1,24 @@
+/*
+EC2CLONE
+Copyright (C) Manolo Müller, 2020
+ 
+This file is part of EC2CLONE.
+
+Foobar is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+Foobar is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
+
 #ifndef ec2__h
 #define ec2__h
 #include "ext.h"
@@ -8,7 +29,7 @@
 #include "gen.h"
 #include "mydsp.h"
 
-enum windowtype{INTERNAL, EXTERNAL};
+enum windowtype{INTERNAL=0, EXTERNAL};
 
 typedef struct _voice{
     t_bool is_active;
@@ -74,6 +95,14 @@ void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
+void ec2_window_type(t_ec2 *x, t_symbol *s){
+    if(s==gensym("internal")){
+        x->window_type = INTERNAL;
+    }else if(s==gensym("external")){
+        x->window_type = EXTERNAL;
+    }
+}
+
 void ec2_window_ext_calc(t_ec2 *x){
     t_atom_long framecount  = buffer_getframecount(x->window_ext_obj);
     t_atom_long chans       = buffer_getchannelcount(x->window_ext_obj);
@@ -106,8 +135,6 @@ void ec2_window_ext_calc(t_ec2 *x){
             index_accum += factor;
         }
     }
-    
-    x->window_type = EXTERNAL;
     buffer_unlocksamples(x->window_ext_obj);
 }
 
