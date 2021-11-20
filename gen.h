@@ -21,11 +21,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   DEALINGS IN THE SOFTWARE.
 *******************************************************************************************************************/
 
-
 #ifndef gen_h
 #define gen_h
 
-/***DSP HELPER FUNCTIONS LIFTED STRAIGHT FROM GEN***/
+/**DSP HELPER FUNCTIONS LIFTED STRAIGHT FROM GEN***/
+
+/*
+ TODO: Replace all with GPL-code
+ */
 
 extern inline t_sample linear_interp(t_sample a, t_sample x, t_sample y) {
     return x+a*(y-x);
