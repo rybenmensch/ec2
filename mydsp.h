@@ -31,6 +31,11 @@ extern t_sample mfmod(t_sample x, t_sample y){
     return a*modulor;
 }
 
+extern t_sample transratio(t_sample x){
+	//expr exp(.057762265 * $f1)
+	return exp(.057762265 * x);
+}
+
 extern void cospan(t_sample in, t_sample pan, t_sample *out_l, t_sample *out_r){
     t_sample p = (pan*0.5)+0.5;
     t_sample pan_scaled = CLAMP(p, 0, 1)/4.;

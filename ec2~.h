@@ -27,6 +27,9 @@ along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
 #include "z_dsp.h"
 #include "gen.h"
 #include "mydsp.h"
+#include "scanner.h"
+#include <time.h>
+#include <stdlib.h>
 
 enum types{INTERNAL=0, EXTERNAL, EXTERNAL_INTERP};
 
@@ -41,6 +44,7 @@ typedef struct _voice{
     t_sample amplitude;    
     t_sample scan_begin;
     t_sample scan_end;
+	t_sample glisson[2];
 }t_voice;
 
 typedef struct _ec2_buffer{
@@ -67,19 +71,20 @@ typedef struct _ec2 {
     t_sample *expodec;
     t_sample *rexpodec;
     t_atom_long window_size;
+    //t_ec2_buffer *windowbuffers;
+    int window_type;
     
     t_buffer_ref *window_ext_ref;
     t_buffer_obj *window_ext_obj;
     t_sample *window_ext_samps;
     t_buffer_ref *window_ext_2_ref;
     t_buffer_obj *window_ext_2_obj;
-    t_sample *window_ext_2_samps;
-    
-    t_ec2_buffer *windowbuffers;
-    int window_type;
-    
+    //t_sample *window_ext_2_samps;
+
     int scan_type;
-    t_atom_long total_voices;
+	t_scanner scanner;
+
+	t_atom_long total_voices;
     t_atom_long active_voices;
     t_voice *voices;
     
@@ -87,27 +92,33 @@ typedef struct _ec2 {
     t_sample scan_count;
     
     t_sample norm;
-    
+
+	t_sample glisson[2];
+	t_sample glisson_inv[2];
+	t_bool glisson_rand;
+
     short *count;
 } t_ec2;
 
 t_symbol *ps_buffer_modified;
 t_class *ec2_class;
 
-t_atom_long inlet_amount;   //why the fuck is this a global ??
+t_atom_long inlet_amount;
 
 void *ec2_new(t_symbol *s,  long argc, t_atom *argv);
 void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
+//void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
 void ec2_scan_type(t_ec2 *x, t_symbol *s){
     if(s==gensym("internal")){
-        x->scan_type = INTERNAL;
+        //x->scan_type = INTERNAL;
+		x->scanner.scan = scanner_internal;
     }else if(s==gensym("external")){
-        x->scan_type = EXTERNAL;
+		x->scanner.scan = scanner_external;
+		//x->scan_type = EXTERNAL;
     }
 }
 
@@ -123,9 +134,53 @@ void ec2_window_type(t_ec2 *x, t_symbol *s){
     }
 }
 
-void ec2_normalization(t_ec2 *x, t_atom_long a){
+void ec2_norm(t_ec2 *x, t_atom_long a){
     a = CLAMP(a, 0, 1);
     x->norm = (a)?(t_sample)1./x->total_voices:1;
+}
+
+void ec2_glisson(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+	//structure of message: glisson startoffset endoffset (in semitones)
+    if(ac!=2){
+        object_error((t_object *)x, "Wrong arguments to glisson");
+        object_error((t_object *)x, "Correct format is: glisson (float)startoffset (float)endoffset");
+        return;
+    }
+	t_sample gl[2];
+	for(int i=0;i<2;i++){
+		if(atom_gettype(av+i) == A_FLOAT){
+			gl[i] = (t_sample)atom_getfloat(av+i);
+		}else if(atom_gettype(av+i) == A_LONG){
+			gl[i] = (t_sample)atom_getlong(av+i);
+		}
+	}
+	//umwandeln in lineare funktion, die bei 0 startoffset, bei 1 endoffset ist
+	t_sample b = gl[0];
+	t_sample m = gl[1] - b;
+	x->glisson[0] = m;
+	x->glisson[1] = b;
+}
+
+void ec2_glissonr(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+	//structure of message: glisson startoffset endoffset (in semitones)
+    if(ac!=2){
+        object_error((t_object *)x, "Wrong arguments to glissonr");
+        object_error((t_object *)x, "Correct format is: glisson (float)startoffset (float)endoffset");
+        return;
+    }
+	t_sample gl[2];
+	for(int i=0;i<2;i++){
+		if(atom_gettype(av+i) == A_FLOAT){
+			gl[i] = (t_sample)atom_getfloat(av+i);
+		}else if(atom_gettype(av+i) == A_LONG){
+			gl[i] = (t_sample)atom_getlong(av+i);
+		}
+	}
+	//umwandeln in lineare funktion, die bei 0 startoffset, bei 1 endoffset ist
+	t_sample b = gl[0];
+	t_sample m = gl[1] - b;
+	x->glisson[0] = m;
+	x->glisson[1] = b;
 }
 
 void ec2_window_ext_calc(t_ec2 *x){
@@ -315,7 +370,6 @@ void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
         x->no_buffer = TRUE;
     }
     */
-
 }
 
 void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
@@ -347,24 +401,20 @@ t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *d
 }
 
 void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
-    x->samplerate = sys_getsr();
-    sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
-    
-    //handle different scan types in one perform method? because else dsp must be recompiled to switch
-    //dynamically between internal and external (LAME)
-    //we could reuse the function pointer trick to calculate the scan position
-    //and reassign ptr at block rate (as in window type internal/external)
-    
+	x->samplerate = samplerate;
+	sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
+
     if(count[inlet_amount-1]){
-        x->scan_type = EXTERNAL;
-        object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64_noscan, 0, NULL);
-    }else{
-        x->scan_type = INTERNAL;
-        object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
-    }
+        //x->scan_type = EXTERNAL;
+		x->scanner.scan = scanner_external;
+	}else{
+        //x->scan_type = INTERNAL;
+		x->scanner.scan = scanner_internal;
+	}
+	object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
 }
 
-long ec2_multichanneloutputs(t_ec2 *x, long index){
+long ec2_mcout(t_ec2 *x, long index){
     if(3==index){
         return 3;
     }if(2==index){

@@ -10,6 +10,7 @@
 		22CF115E0EE9A6F40054F513 /* ec2~.c in Sources */ = {isa = PBXBuildFile; fileRef = 22CF115D0EE9A6F40054F513 /* ec2~.c */; };
 		934F910C25A485880072A9FB /* mydsp.h in Headers */ = {isa = PBXBuildFile; fileRef = 934F910B25A485880072A9FB /* mydsp.h */; };
 		934F910E25A485D90072A9FB /* ec2~.h in Headers */ = {isa = PBXBuildFile; fileRef = 934F910D25A485D90072A9FB /* ec2~.h */; };
+		93886222274D7A3F003A295B /* scanner.h in Headers */ = {isa = PBXBuildFile; fileRef = 93886221274D7A3F003A295B /* scanner.h */; };
 		9398C9BF25A365AE0045716D /* gen.h in Headers */ = {isa = PBXBuildFile; fileRef = 9398C9BD25A364F70045716D /* gen.h */; };
 /* End PBXBuildFile section */
 
@@ -19,6 +20,7 @@
 		2FBBEAE508F335360078DB84 /* ec2~.mxo */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "ec2~.mxo"; sourceTree = BUILT_PRODUCTS_DIR; };
 		934F910B25A485880072A9FB /* mydsp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mydsp.h; sourceTree = "<group>"; };
 		934F910D25A485D90072A9FB /* ec2~.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ec2~.h"; sourceTree = "<group>"; };
+		93886221274D7A3F003A295B /* scanner.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scanner.h; sourceTree = "<group>"; };
 		9398C9BD25A364F70045716D /* gen.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = gen.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -39,6 +41,7 @@
 				22CF10220EE984600054F513 /* maxmspsdk.xcconfig */,
 				22CF115D0EE9A6F40054F513 /* ec2~.c */,
 				934F910D25A485D90072A9FB /* ec2~.h */,
+				93886221274D7A3F003A295B /* scanner.h */,
 				934F910B25A485880072A9FB /* mydsp.h */,
 				9398C9BD25A364F70045716D /* gen.h */,
 				19C28FB4FE9D528D11CA2CBB /* Products */,
@@ -61,6 +64,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				93886222274D7A3F003A295B /* scanner.h in Headers */,
 				934F910E25A485D90072A9FB /* ec2~.h in Headers */,
 				934F910C25A485880072A9FB /* mydsp.h in Headers */,
 				9398C9BF25A365AE0045716D /* gen.h in Headers */,
