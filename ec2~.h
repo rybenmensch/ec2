@@ -81,7 +81,6 @@ typedef struct _ec2 {
     t_buffer_obj *window_ext_2_obj;
     //t_sample *window_ext_2_samps;
 
-    int scan_type;
 	t_scanner scanner;
 
 	t_atom_long total_voices;
@@ -110,15 +109,12 @@ void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
 
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-//void ec2_perform64_noscan(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
 
 void ec2_scan_type(t_ec2 *x, t_symbol *s){
     if(s==gensym("internal")){
-        //x->scan_type = INTERNAL;
 		x->scanner.scan = scanner_internal;
     }else if(s==gensym("external")){
 		x->scanner.scan = scanner_external;
-		//x->scan_type = EXTERNAL;
     }
 }
 
@@ -405,10 +401,8 @@ void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long 
 	sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
 
     if(count[inlet_amount-1]){
-        //x->scan_type = EXTERNAL;
 		x->scanner.scan = scanner_external;
 	}else{
-        //x->scan_type = INTERNAL;
 		x->scanner.scan = scanner_internal;
 	}
 	object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
