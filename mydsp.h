@@ -20,8 +20,7 @@ along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef mydsp_h
 #define mydsp_h
-#include "ec2~.h"
-
+#include "common.h"
 extern t_sample mfmod(t_sample x, t_sample y){
     t_sample modulated = x;
     t_sample modulor = y;

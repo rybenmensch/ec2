@@ -11,6 +11,8 @@
 		934F910C25A485880072A9FB /* mydsp.h in Headers */ = {isa = PBXBuildFile; fileRef = 934F910B25A485880072A9FB /* mydsp.h */; };
 		934F910E25A485D90072A9FB /* ec2~.h in Headers */ = {isa = PBXBuildFile; fileRef = 934F910D25A485D90072A9FB /* ec2~.h */; };
 		93886222274D7A3F003A295B /* scanner.h in Headers */ = {isa = PBXBuildFile; fileRef = 93886221274D7A3F003A295B /* scanner.h */; };
+		9388622D274DA653003A295B /* window.h in Headers */ = {isa = PBXBuildFile; fileRef = 9388622B274DA653003A295B /* window.h */; };
+		93886230274E3B21003A295B /* common.h in Headers */ = {isa = PBXBuildFile; fileRef = 9388622F274E3B21003A295B /* common.h */; };
 		9398C9BF25A365AE0045716D /* gen.h in Headers */ = {isa = PBXBuildFile; fileRef = 9398C9BD25A364F70045716D /* gen.h */; };
 /* End PBXBuildFile section */
 
@@ -21,6 +23,8 @@
 		934F910B25A485880072A9FB /* mydsp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mydsp.h; sourceTree = "<group>"; };
 		934F910D25A485D90072A9FB /* ec2~.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ec2~.h"; sourceTree = "<group>"; };
 		93886221274D7A3F003A295B /* scanner.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scanner.h; sourceTree = "<group>"; };
+		9388622B274DA653003A295B /* window.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = window.h; sourceTree = "<group>"; };
+		9388622F274E3B21003A295B /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
 		9398C9BD25A364F70045716D /* gen.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = gen.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -44,6 +48,8 @@
 				93886221274D7A3F003A295B /* scanner.h */,
 				934F910B25A485880072A9FB /* mydsp.h */,
 				9398C9BD25A364F70045716D /* gen.h */,
+				9388622B274DA653003A295B /* window.h */,
+				9388622F274E3B21003A295B /* common.h */,
 				19C28FB4FE9D528D11CA2CBB /* Products */,
 			);
 			name = iterator;
@@ -65,8 +71,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				93886222274D7A3F003A295B /* scanner.h in Headers */,
+				93886230274E3B21003A295B /* common.h in Headers */,
 				934F910E25A485D90072A9FB /* ec2~.h in Headers */,
 				934F910C25A485880072A9FB /* mydsp.h in Headers */,
+				9388622D274DA653003A295B /* window.h in Headers */,
 				9398C9BF25A365AE0045716D /* gen.h in Headers */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

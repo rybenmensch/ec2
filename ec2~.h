@@ -20,18 +20,11 @@ along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifndef ec2__h
 #define ec2__h
-#include "ext.h"
-#include "ext_obex.h"
-#include "ext_common.h"
-#include "ext_buffer.h"
-#include "z_dsp.h"
+#include "common.h"
 #include "gen.h"
 #include "mydsp.h"
 #include "scanner.h"
-#include <time.h>
-#include <stdlib.h>
-
-enum types{INTERNAL=0, EXTERNAL, EXTERNAL_INTERP};
+#include "window.h"
 
 typedef struct _voice{
     t_bool is_active;
@@ -71,8 +64,8 @@ typedef struct _ec2 {
     t_sample *expodec;
     t_sample *rexpodec;
     t_atom_long window_size;
-    //t_ec2_buffer *windowbuffers;
     int window_type;
+	t_window window;
     
     t_buffer_ref *window_ext_ref;
     t_buffer_obj *window_ext_obj;
@@ -107,28 +100,23 @@ t_atom_long inlet_amount;
 void *ec2_new(t_symbol *s,  long argc, t_atom *argv);
 void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
-
+void ec2_norm(t_ec2 *x, t_atom_long a);
+void ec2_glisson(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
+void ec2_glissonr(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
+void ec2_scan_type(t_ec2 *x, t_symbol *s);
+void ec2_window_type(t_ec2 *x, t_symbol *s);
+void ec2_window_ext_calc(t_ec2 *x);
+void ec2_buffer_copy(t_ec2 *x, t_ec2_buffer *b);
+t_bool check_create_buffer(t_ec2 *x, t_ec2_buffer *b, t_symbol *name);
+t_bool check_buffer(t_ec2 *x, t_buffer_ref **ref, t_buffer_obj **obj, t_symbol *name);
+void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
+void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
+void ec2_buffer_limits(t_ec2 *x);
+void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
+void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
+void ec2_dblclick(t_ec2 *x);
+t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data);
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-
-void ec2_scan_type(t_ec2 *x, t_symbol *s){
-    if(s==gensym("internal")){
-		x->scanner.scan = scanner_internal;
-    }else if(s==gensym("external")){
-		x->scanner.scan = scanner_external;
-    }
-}
-
-void ec2_window_type(t_ec2 *x, t_symbol *s){
-    if(s==gensym("internal")){
-        x->window_type = INTERNAL;
-    }else if(s==gensym("external")){
-        if(!x->window_ext_ref){
-            object_error((t_object *)x, "No external window buffer set yet!");
-            return;
-        }
-        x->window_type = EXTERNAL;
-    }
-}
 
 void ec2_norm(t_ec2 *x, t_atom_long a){
     a = CLAMP(a, 0, 1);
@@ -179,6 +167,28 @@ void ec2_glissonr(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
 	x->glisson[1] = b;
 }
 
+void ec2_scan_type(t_ec2 *x, t_symbol *s){
+    if(s==gensym("internal")){
+		x->scanner.scan = scanner_internal;
+    }else if(s==gensym("external")){
+		x->scanner.scan = scanner_external;
+    }
+}
+
+void ec2_window_type(t_ec2 *x, t_symbol *s){
+    if(s==gensym("internal")){
+        x->window_type = INTERNAL;
+		x->window.window = window_internal;
+    }else if(s==gensym("external")){
+        if(!x->window_ext_ref){
+            object_error((t_object *)x, "No external window buffer set yet!");
+            return;
+        }
+        x->window_type = EXTERNAL;
+		x->window.window = window_external;
+    }
+}
+
 void ec2_window_ext_calc(t_ec2 *x){
     t_atom_long framecount  = buffer_getframecount(x->window_ext_obj);
     t_atom_long chans       = buffer_getchannelcount(x->window_ext_obj);
@@ -193,6 +203,7 @@ void ec2_window_ext_calc(t_ec2 *x){
     if(framecount==512){
         for(long i=0;i<x->window_size;i++){
             long index = chans*i;
+			//crash on reinstantiating buffer object used as external buffer
             x->window_ext_samps[i] = (t_sample)buffersamps[index];
         }
     }else{
@@ -417,36 +428,4 @@ long ec2_mcout(t_ec2 *x, long index){
         return 1;
     }
 }
-
-void calculate_windows(t_ec2 *x){
-    //weibull for (r)expodec?
-    t_atom_long size = x->window_size-1;
-    
-    //CALCULATE TUKEY
-    t_sample alpha = 0.5;
-    t_sample anm12 = 0.5*alpha*size;
-    
-    for(int i=0;i<size+1;i++){
-        t_sample val = 0;
-        if(i<=anm12){
-            val = 0.5*(1+cos(PI*(i/anm12 - 1)));
-        }else if(i<size*(1-0.5*alpha)){
-            val = 1;
-        }else{
-            val = 0.5*(1+cosf(PI*(i/anm12 - 2/alpha + 1)));
-        }
-        x->tukey[i] = val;
-    }
-    
-    //CALCULATE (R)EXPODEC
-    for(int i=0;i<size+1;i++){
-        t_sample phase = (float)i/size;
-        //experimental value
-        t_sample a = 36;
-        t_sample val = (powf(a, phase)-1)/(a-1);
-        x->expodec[size-i] = val;
-        x->rexpodec[i] = val;
-    }
-}
-
 #endif /* ec2__h */

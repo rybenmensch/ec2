@@ -105,17 +105,22 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
         outlet_new((t_object *)x, "signal");
     }
 
+	/*
     x->window_size = 512;
     x->tukey = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
     x->expodec = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
     x->rexpodec = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
     calculate_windows(x);
+	*/
+	window_init(&x->window, 512);
+    x->window_ext_samps = NULL;
+    x->window_type = INTERNAL;
+    x->window_ext_ref = NULL;
+    x->window_ext_2_ref = NULL;
 
     x->total_voices = 64;
     x->active_voices = 0;
-
     x->voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
-
     for(int i=0;i<x->total_voices;i++){
             x->voices[i].is_active = 0;
             x->voices[i].play_phase = 0.;
@@ -125,26 +130,20 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->scan_count = 0;
     x->samplerate = 44100;
 
-    x->buffersamps = NULL;
-    x->buffer_modified = TRUE;
-    x->buffer_size = 1;
-    x->buffer_reference = NULL;
-    x->no_buffer = TRUE;
-
-    x->window_ext_samps = NULL;
-    x->window_type = INTERNAL;
-    x->window_ext_ref = NULL;
-    x->window_ext_2_ref = NULL;
-
-	scanner_init(&(x->scanner), 0.);
+	scanner_init(&x->scanner, 0.);
 
 	x->glisson[0] = x->glisson_inv[0] = 0;
 	x->glisson[1] = x->glisson_inv[1] = 0;
 	x->glisson_rand = FALSE;
 
-    ec2_norm(x, 1);
+    x->buffersamps = NULL;
+    x->buffer_modified = TRUE;
+    x->buffer_size = 1;
+    x->buffer_reference = NULL;
+    x->no_buffer = TRUE;
     ec2_set(x, s, argc, argv);
 
+    ec2_norm(x, 1);
 
 	srand((uint)time(NULL));
 
@@ -214,6 +213,54 @@ t_sample window_direct(t_ec2 *x, t_voice *v){
     return interp;
 }
 
+t_sample window_internal(t_window *w, t_ec2 *x, t_voice *v){
+    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
+    //window determines the "life time" of a single grain!
+    t_sample window_phase = v->window_phase;
+    window_phase += v->window_increment;
+    v->window_phase = window_phase;
+
+    if(window_phase >= w->size){
+        v->is_active = FALSE;
+        x->active_voices--;
+        return 0;
+    }
+
+    t_sample tuk        = peek(w->tukey,	w->size, window_phase);
+    t_sample expo       = peek(w->expodec,	w->size, window_phase);
+    t_sample rexpo      = peek(w->rexpodec, w->size, window_phase);
+    t_sample env_shape  = v->envelope_shape;
+
+    t_sample interp = 0;
+    if(env_shape<0.5){
+        interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
+    }else if(env_shape==0.5){
+        interp = tuk;
+    }else if(env_shape<=1.){
+        interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
+    }else{
+        interp = tuk;
+    }
+    return interp;
+}
+
+t_sample window_external(t_window *w, t_ec2 *x, t_voice *v){
+    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
+    //window determines the "life time" of a single grain!
+    t_sample window_phase = v->window_phase;
+    window_phase += v->window_increment;
+    v->window_phase = window_phase;
+
+    if(window_phase >= w->size){
+        v->is_active = FALSE;
+        x->active_voices--;
+        return 0;
+    }
+
+    //t_sample samp = peek(w->window_ext_samps, w->size, window_phase);
+    //return samp;
+	return 0;
+}
 
 t_sample window(t_ec2 *x, t_voice *v){
     //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
@@ -314,14 +361,15 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_atom_long window_size = x->window_size;
     t_float samplerate      = x->samplerate;
 
+	/*
     t_sample (*window_ptr)(t_ec2 *x, t_voice *v);
     window_ptr = (x->window_type)?window_ext:window;
-
+	 */
+	t_window *w = &x->window;
 	t_scanner *scp = &x->scanner;
 
     while(n--){
         t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude, scan;
-        //t_sample scan_end, starting_point, scan_count, window_increment;
 		t_sample window_increment;
 
         //increment all pointers, get all values, if not connected, assign defaults
@@ -337,8 +385,9 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
 		scan			= *p_scan++;			scan			= (count[9])?scan:0.;
 		scp->scan(scp, scan, buffer_size);
 
-        t_atom_long new_index = 0;
+		//last grain to be over could return its index, to be used immediately
         if(trig>0. && amplitude!=0){
+			t_atom_long new_index = 0;
             if(x->active_voices < x->total_voices){
                 x->active_voices++;
                 for(int i=0;i<x->total_voices;i++){
@@ -371,9 +420,9 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
                 t_voice *v = &(x->voices[i]);
-                t_sample windowsamp     = (*window_ptr)(x, v);
-                //t_sample windowsamp     = window(x, v);
-                t_sample playbacksamp   = playback(x, v);
+                //t_sample windowsamp     = (*window_ptr)(x, v);
+				t_sample windowsamp = w->window(w, x, v);
+				t_sample playbacksamp   = playback(x, v);
 
                 playbacksamp *= windowsamp;
                 playbacksamp *= x->voices[i].amplitude;
@@ -388,19 +437,15 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
 
         *out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
         *out_r++ = FIX_DENORM_NAN_SAMPLE(accum_r);
+		//maybe remove this
         for(int i=0;i<x->total_voices;i++){
-            t_bool sali = x->voices[i].is_active;
-            *numbers_out[i]++ = sali;
-        }
+			*numbers_out[i]++ = x->voices[i].is_active;
+		}
 
-        //*scan_out++ = (t_sample)fmod(scan_count + scan_begin, buffer_size+1)/buffer_size;
-        //*scan_begin_out++ = (t_sample) scan_begin/buffer_size;
-        //*scan_end_out++ = (t_sample )scan_end/buffer_size;
 		*scan_out++ 		= scp->out;
 		*scan_begin_out++	= scp->begin_out;
 		*scan_end_out++		= scp->end_out;
         //reassign cached values that update sample wise HERE:
-        //x->scan_count = scan_count;
     }
 
     //reassign cached values that update in block size HERE:
