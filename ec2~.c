@@ -23,8 +23,6 @@ along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
 //OPTIMIZATION THOUGHTS
 //apparently it's faster if there are no functions in for loops, so check that out
 
-//OPTIMIZE LAST...
-
 /*
 TODO BEFORE OPTIMIZATIONS:
 BUGS:
