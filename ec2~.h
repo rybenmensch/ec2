@@ -61,20 +61,12 @@ typedef struct _ec2 {
     t_bool buffer_modified;
     t_bool no_buffer;
     
-    t_sample *tukey;
-    t_sample *expodec;
-    t_sample *rexpodec;
-    t_atom_long window_size;
-    int window_type;
+    //t_sample *tukey;
+    //t_sample *expodec;
+    //t_sample *rexpodec;
+    //t_atom_long window_size;
+    //int window_type;
 	t_window window;
-
-	
-    t_buffer_ref *window_ext_ref;
-    t_buffer_obj *window_ext_obj;
-    t_sample *window_ext_samps;
-    //t_buffer_ref *window_ext_2_ref;
-    //t_buffer_obj *window_ext_2_obj;
-    //t_sample *window_ext_2_samps;
 
 	t_scanner scanner;
 
@@ -119,7 +111,7 @@ void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
 void ec2_dblclick(t_ec2 *x);
 t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data);
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
 void ec2_norm(t_ec2 *x, t_atom_long a){
     a = CLAMP(a, 0, 1);
     x->norm = (a)?(t_sample)1./x->total_voices:1;
@@ -171,60 +163,24 @@ void ec2_glissonr(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
 
 void ec2_scan_type(t_ec2 *x, t_symbol *s){
     if(s==gensym("internal")){
-		x->scanner.scan = scanner_internal;
+		x->scanner.type = INTERNAL;
     }else if(s==gensym("external")){
-		x->scanner.scan = scanner_external;
+		x->scanner.type = EXTERNAL;
     }
 }
 
 void ec2_window_type(t_ec2 *x, t_symbol *s){
+	t_window *w = &x->window;
     if(s==gensym("internal")){
-        x->window_type = INTERNAL;
-		x->window.window = window_internal;
+		w->window = window_internal;
+		//w->window = window_direct;
     }else if(s==gensym("external")){
-        if(!x->window_ext_ref){
+        if(!w->window_ext_ref){
             object_error((t_object *)x, "No external window buffer set yet!");
             return;
         }
-        x->window_type = EXTERNAL;
-		x->window.window = window_external;
+		w->window = window_external;
     }
-}
-
-void ec2_window_ext_calc(t_ec2 *x){
-    t_atom_long framecount  = buffer_getframecount(x->window_ext_obj);
-    t_atom_long chans       = buffer_getchannelcount(x->window_ext_obj);
-    t_float *buffersamps    = buffer_locksamples(x->window_ext_obj);
-
-    if(x->window_ext_samps){
-        sysmem_freeptr(x->window_ext_samps);
-    }
-    
-    x->window_ext_samps = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
-    
-    if(framecount==512){
-        for(long i=0;i<x->window_size;i++){
-            long index = chans*i;
-			//crash on reinstantiating buffer object used as external buffer
-            x->window_ext_samps[i] = (t_sample)buffersamps[index];
-        }
-    }else{
-        t_sample temp_buffer[framecount];
-        
-        for(long i=0;i<framecount;i++){
-            temp_buffer[i] = (t_sample)buffersamps[i];
-        }
-        //t_sample factor = (t_sample)x->window_size/(t_sample)framecount;
-        t_sample factor = (t_sample)framecount/(t_sample)x->window_size;
-
-        t_sample index_accum = 0;
-        for(long i=0;i<x->window_size;i++){
-            t_sample samp = peek(temp_buffer, framecount-1, index_accum);
-            x->window_ext_samps[i] = samp;
-            index_accum += factor;
-        }
-    }
-    buffer_unlocksamples(x->window_ext_obj);
 }
 
 void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
@@ -232,6 +188,7 @@ void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
 }
 
 void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+	t_window *w = &x->window;
     if(ac<=0 || ac>2){
         object_error((t_object *)x, "Wrong arguments to windowext");
         object_error((t_object *)x, "Correct format is: windowext buffername");
@@ -240,7 +197,7 @@ void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
     }
 
     t_symbol *name1 = atom_getsym(av);
-    t_bool return_1 = check_buffer(x, &(x->window_ext_ref), &(x->window_ext_obj), name1);
+    t_bool return_1 = check_buffer(x, &(w->window_ext_ref), &(w->window_ext_obj), name1);
     
     //nested if's of death..
     //not super proud, rethink LATER(tm)
@@ -264,6 +221,43 @@ void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
         object_error((t_object *)x, "Buffer %s probably doesn't exist.", name1->s_name);
         return;
     }
+}
+
+void ec2_window_ext_calc(t_ec2 *x){
+	t_window *w = &x->window;
+    t_atom_long framecount  = buffer_getframecount(w->window_ext_obj);
+    t_atom_long chans       = buffer_getchannelcount(w->window_ext_obj);
+    t_float *buffersamps    = buffer_locksamples(w->window_ext_obj);
+
+    if(w->window_ext_samps){
+        sysmem_freeptr(w->window_ext_samps);
+    }
+
+    w->window_ext_samps = (t_sample *)sysmem_newptr(w->size*sizeof(t_sample));
+
+    if(framecount==512){
+        for(long i=0;i<w->size;i++){
+            long index = chans*i;
+			//crash on reinstantiating buffer object used as external buffer
+            w->window_ext_samps[i] = (t_sample)buffersamps[index];
+        }
+    }else{
+        t_sample temp_buffer[framecount];
+
+        for(long i=0;i<framecount;i++){
+            temp_buffer[i] = (t_sample)buffersamps[i];
+        }
+        //t_sample factor = (t_sample)x->window_size/(t_sample)framecount;
+        t_sample factor = (t_sample)framecount/(t_sample)w->size;
+
+        t_sample index_accum = 0;
+        for(long i=0;i<w->size;i++){
+            t_sample samp = peek(temp_buffer, framecount-1, index_accum);
+            w->window_ext_samps[i] = samp;
+            index_accum += factor;
+        }
+    }
+    buffer_unlocksamples(w->window_ext_obj);
 }
 
 /*
@@ -418,18 +412,6 @@ t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *d
     return buffer_ref_notify(x->buffer_reference, s, msg, sender, data);
 }
 
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
-	x->samplerate = samplerate;
-	sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
-
-    if(count[inlet_amount-1]){
-		x->scanner.scan = scanner_external;
-	}else{
-		x->scanner.scan = scanner_internal;
-	}
-	object_method(dsp64, gensym("dsp_add64"), x, ec2_perform64, 0, NULL);
-}
-
 long ec2_mcout(t_ec2 *x, long index){
     if(3==index){
         return 3;
@@ -439,4 +421,56 @@ long ec2_mcout(t_ec2 *x, long index){
         return 1;
     }
 }
+
+void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s){
+    if(m == ASSIST_INLET){
+        switch(a){
+            case 0:
+                sprintf(s, "(signal) Trigger");
+                break;
+            case 1:
+                sprintf(s, "(signal) Playback rate");
+                break;
+            case 2:
+                sprintf(s, "(signal) Scan begin (0. - 1.)");
+                break;
+            case 3:
+                sprintf(s, "(signal) Scan range (0. - 1.)");
+                break;
+            case 4:
+                sprintf(s, "(signal) Scan speed");
+                break;
+            case 5:
+                sprintf(s, "(signal) Grain duration (ms)");
+                break;
+            case 6:
+                sprintf(s, "(signal) Envelope shape (0. - 1.)");
+                break;
+            case 7:
+                sprintf(s, "(signal) Pan (-1. - 1.)");
+                break;
+            case 8:
+                sprintf(s, "(signal) Amplitude (0. - 1.)");
+                break;
+            case 9:
+                sprintf(s, "(signal) External scan position (0. - 1.)");
+        }
+    }else{
+        switch(a){
+            case 0:
+                sprintf(s, "(signal) Left output");
+                break;
+            case 1:
+                sprintf(s, "(signal) Right output");
+                break;
+            case 2:
+                sprintf(s, "(mcsignal) Busymap");
+                break;
+            case 3:
+                sprintf(s, "(mcsignal) Scanhead and range");
+                break;
+        }
+    }
+}
+
 #endif /* ec2__h */

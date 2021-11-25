@@ -16,4 +16,7 @@
 struct _ec2;
 struct _voice;
 
+enum types {INTERNAL=0, EXTERNAL, EXTERNAL_INTERP};
+
+
 #endif /* common_h */
