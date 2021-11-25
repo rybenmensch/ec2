@@ -32,40 +32,49 @@ typedef struct _scanner{
 	t_sample begin_out;
 	t_sample end_out;
 	void (*scan)(struct _scanner*, t_sample, t_atom_long);
+	int type;
 }t_scanner;
 
-void scanner_external(t_scanner *scp, t_sample scan, t_atom_long buffer_size){
-	scp->out		= scan;
-	scp->position 	= scan * buffer_size;
+void scanner_external(t_scanner *scanner, t_sample scan, t_atom_long buffer_size){
+	scanner->out		= scan;
+	scanner->position 	= scan * buffer_size;
 
-	scp->begin		= 0;
-	scp->end		= buffer_size;
+	scanner->begin		= 0;
+	scanner->end		= buffer_size;
 
-	scp->begin_out	= 0;
-	scp->end_out	= 1;
+	scanner->begin_out	= 0;
+	scanner->end_out	= 1;
 }
 
-void scanner_internal(t_scanner *scp, t_sample scan, t_atom_long buffer_size){
+void scanner_internal(t_scanner *scanner, t_sample scan, t_atom_long buffer_size){
 	//SCANNER
 	//we're off one sample somwhere in scan logic
 	//scan logic in general is sometimes not right
-	scp->index += scp->speed;
-	scp->begin = CLAMP(scp->begin, 0, 1)*buffer_size;
-	scp->range = CLAMP(scp->range, 0, 1)*buffer_size;
+	scanner->index += scanner->speed;
+	scanner->begin = CLAMP(scanner->begin, 0, 1)*buffer_size;
+	scanner->range = CLAMP(scanner->range, 0, 1)*buffer_size;
 	//overflow
-	scp->index = fmod(scp->index, scp->range+1);
+	scanner->index = fmod(scanner->index, scanner->range+1);
 	//underflow
-	scp->index = (scp->index<0)?scp->range:scp->index;
-	scp->position = fmod(scp->index + scp->begin, buffer_size+1);
+	scanner->index = (scanner->index<0)?scanner->range:scanner->index;
+	scanner->position = fmod(scanner->index + scanner->begin, buffer_size+1);
 
-	scp->end = fmod(scp->range + scp->begin, buffer_size+1);
-	scp->out = (t_sample)fmod(scp->index + scp->begin, buffer_size+1)/buffer_size;
-	scp->end_out = (t_sample)scp->end/buffer_size;
+	scanner->end = fmod(scanner->range + scanner->begin, buffer_size+1);
+	scanner->out = (t_sample)fmod(scanner->index + scanner->begin, buffer_size+1)/buffer_size;
+	scanner->end_out = (t_sample)scanner->end/buffer_size;
 }
 
-void scanner_init(t_scanner *scp, t_sample position){
-	scp->index = position;
-	scp->scan = scanner_internal;
+void scanner_init(t_scanner *scanner, t_sample position){
+	scanner->index = position;
+	scanner->type = INTERNAL;
+}
+
+void scanner_set_type(t_scanner *scanner, t_bool connected){
+	if(scanner->type == INTERNAL || !connected){
+		scanner->scan = scanner_internal;
+	}else if(scanner->type == EXTERNAL){
+		scanner->scan = scanner_external;
+	}
 }
 
 #endif

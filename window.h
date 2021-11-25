@@ -2,24 +2,26 @@
 #define window_h
 #include "common.h"
 
-enum window_type{INTERNAL=0, EXTERNAL, EXTERNAL_INTERP};
-
 typedef struct _window{
 	t_atom_long size;
 	t_sample *tukey;
 	t_sample *expodec;
 	t_sample *rexpodec;
-	enum window_type type;
 
 	t_sample *window_ext_samps;
 	t_buffer_ref *window_ext_ref;
 	t_buffer_obj *window_ext_obj;
 
-	t_sample (*window)(struct _window*, struct _ec2*, struct _voice*);
+    t_sample *window_ext_2_samps;
+    t_buffer_ref *window_ext_2_ref;
+    t_buffer_obj *window_ext_2_obj;
+
+	t_sample (*window)(struct _window*, struct _voice*);
 }t_window;
 
-t_sample window_internal(t_window *w, struct _ec2 *x, struct _voice *v);
-t_sample window_external(t_window *w, struct _ec2 *x, struct _voice *v);
+t_sample window_internal(t_window *w, struct _voice *v);
+t_sample window_direct(t_window *w, struct _voice *v);
+t_sample window_external(t_window *w, struct _voice *v);
 
 void calculate_windows(t_window *window);
 
@@ -29,13 +31,35 @@ void window_init(t_window *window, t_atom_long size){
 	window->expodec  = (t_sample *)sysmem_newptr(window->size*sizeof(t_sample));
 	window->rexpodec = (t_sample *)sysmem_newptr(window->size*sizeof(t_sample));
 
-	window->type				= INTERNAL;
 	window->window				= window_internal;
+	//window->window				= window_direct;
 
 	window->window_ext_samps 	= NULL;
 	window->window_ext_ref		= NULL;
 	window->window_ext_obj		= NULL;
+	window->window_ext_2_samps 	= NULL;
+	window->window_ext_2_ref	= NULL;
+	window->window_ext_2_obj	= NULL;
+
 	calculate_windows(window);
+}
+
+void window_free(t_window *window){
+	object_free(window->window_ext_ref);
+	object_free(window->window_ext_2_ref);
+
+	if(window->tukey){
+		sysmem_freeptr(window->tukey);
+	}
+	if(window->expodec){
+		sysmem_freeptr(window->expodec);
+	}
+	if(window->rexpodec){
+		sysmem_freeptr(window->rexpodec);
+	}
+	if(window->window_ext_samps){
+		sysmem_freeptr(window->window_ext_samps);
+	}
 }
 
 void calculate_windows(t_window *window){
@@ -44,7 +68,6 @@ void calculate_windows(t_window *window){
 	phase between 0 and 1
 	(1.6/0.26) * pow((phase/1.6), (1.6-1)) * exp(-1 * pow((phase/0.26), 1.6))
 	*/
-
     t_atom_long size = window->size-1;
 
     //CALCULATE TUKEY
