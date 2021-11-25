@@ -27,7 +27,8 @@ along with EC2CLONE.  If not, see <http://www.gnu.org/licenses/>.
 #include "window.h"
 
 typedef struct _voice{
-    t_bool is_active;
+    t_bool   is_active;
+	t_bool   is_done;
     t_sample playback_rate;
     t_sample play_phase;
     t_sample window_phase;
@@ -37,7 +38,7 @@ typedef struct _voice{
     t_sample amplitude;    
     t_sample scan_begin;
     t_sample scan_end;
-	t_sample glisson[2];
+	//t_sample glisson[2];
 }t_voice;
 
 typedef struct _ec2_buffer{
@@ -66,12 +67,13 @@ typedef struct _ec2 {
     t_atom_long window_size;
     int window_type;
 	t_window window;
-    
+
+	
     t_buffer_ref *window_ext_ref;
     t_buffer_obj *window_ext_obj;
     t_sample *window_ext_samps;
-    t_buffer_ref *window_ext_2_ref;
-    t_buffer_obj *window_ext_2_obj;
+    //t_buffer_ref *window_ext_2_ref;
+    //t_buffer_obj *window_ext_2_obj;
     //t_sample *window_ext_2_samps;
 
 	t_scanner scanner;
@@ -225,67 +227,8 @@ void ec2_window_ext_calc(t_ec2 *x){
     buffer_unlocksamples(x->window_ext_obj);
 }
 
-void ec2_buffer_copy(t_ec2 *x, t_ec2_buffer *b){
-    t_atom_long framecount  = buffer_getframecount(b->obj);
-    t_atom_long chans       = buffer_getchannelcount(b->obj);
-    t_float *buffersamps    = buffer_locksamples(b->obj);
-
-    if(b->samples){
-        sysmem_freeptr(b->samples);
-    }
-    
-    b->samples = (t_sample *)sysmem_newptr(b->size*sizeof(t_sample));
-    
-    if(framecount==x->window_size){
-        for(long i=0;i<x->window_size;i++){
-            long index = chans*i;
-            b->samples[i] = (t_sample)buffersamps[index];
-        }
-    }else{
-        t_sample temp_buffer[framecount];
-        
-        for(long i=0;i<framecount;i++){
-            temp_buffer[i] = (t_sample)buffersamps[i];
-        }
-        //t_sample factor = (t_sample)x->window_size/(t_sample)framecount;
-        t_sample factor = (t_sample)framecount/(t_sample)x->window_size;
-
-        t_sample index_accum = 0;
-        for(long i=0;i<x->window_size;i++){
-            t_sample samp = peek(temp_buffer, framecount-1, index_accum);
-            b->samples[i] = samp;
-            index_accum += factor;
-        }
-    }
-    buffer_unlocksamples(b->obj);
-}
-
-t_bool check_create_buffer(t_ec2 *x, t_ec2_buffer *b, t_symbol *name){
-    if(!b->ref){
-        b->ref = buffer_ref_new((t_object *)x, name);
-    }else{
-        buffer_ref_set(b->ref, name);
-    }
-    
-    if((b->obj = buffer_ref_getobject(b->ref))){
-        return TRUE;
-    }else{
-        return FALSE;
-    }
-}
-
-t_bool check_buffer(t_ec2 *x, t_buffer_ref **ref, t_buffer_obj **obj, t_symbol *name){
-    if(!(*ref)){
-        (*ref) = buffer_ref_new((t_object *)x, name);
-    }else{
-        buffer_ref_set((*ref), name);
-    }
-    
-    if(((*obj) = buffer_ref_getobject(*ref))){
-        return TRUE;
-    }else{
-        return FALSE;
-    }
+void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+    defer_low(x, (method)ec2_do_window_ext, s, ac, av);
 }
 
 void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
@@ -305,6 +248,7 @@ void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
         if(ac==1){
             ec2_window_ext_calc(x);
         }else{
+			/*
             t_symbol *name2 = atom_getsym(av+1);
             t_bool return_2 = check_buffer(x, &(x->window_ext_2_ref), &(x->window_ext_2_obj), name2);
             
@@ -314,6 +258,7 @@ void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
                 object_error((t_object *)x, "Buffer %s probably doesn't exist.", name2->s_name);
                 return;
             }
+			*/
         }
     }else{
         object_error((t_object *)x, "Buffer %s probably doesn't exist.", name1->s_name);
@@ -321,11 +266,77 @@ void ec2_do_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
     }
 }
 
-void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
-    defer_low(x, (method)ec2_do_window_ext, s, ac, av);
+/*
+void ec2_buffer_copy(t_ec2 *x, t_ec2_buffer *b){
+    t_atom_long framecount  = buffer_getframecount(b->obj);
+    t_atom_long chans       = buffer_getchannelcount(b->obj);
+    t_float *buffersamps    = buffer_locksamples(b->obj);
+
+    if(b->samples){
+        sysmem_freeptr(b->samples);
+    }
+
+    b->samples = (t_sample *)sysmem_newptr(b->size*sizeof(t_sample));
+
+    if(framecount==x->window_size){
+        for(long i=0;i<x->window_size;i++){
+            long index = chans*i;
+            b->samples[i] = (t_sample)buffersamps[index];
+        }
+    }else{
+        t_sample temp_buffer[framecount];
+
+        for(long i=0;i<framecount;i++){
+            temp_buffer[i] = (t_sample)buffersamps[i];
+        }
+        //t_sample factor = (t_sample)x->window_size/(t_sample)framecount;
+        t_sample factor = (t_sample)framecount/(t_sample)x->window_size;
+
+        t_sample index_accum = 0;
+        for(long i=0;i<x->window_size;i++){
+            t_sample samp = peek(temp_buffer, framecount-1, index_accum);
+            b->samples[i] = samp;
+            index_accum += factor;
+        }
+    }
+    buffer_unlocksamples(b->obj);
+}
+ */
+
+/*
+t_bool check_create_buffer(t_ec2 *x, t_ec2_buffer *b, t_symbol *name){
+    if(!b->ref){
+        b->ref = buffer_ref_new((t_object *)x, name);
+    }else{
+        buffer_ref_set(b->ref, name);
+    }
+
+    if((b->obj = buffer_ref_getobject(b->ref))){
+        return TRUE;
+    }else{
+        return FALSE;
+    }
+}
+ */
+
+
+t_bool check_buffer(t_ec2 *x, t_buffer_ref **ref, t_buffer_obj **obj, t_symbol *name){
+    if(!(*ref)){
+        (*ref) = buffer_ref_new((t_object *)x, name);
+    }else{
+        buffer_ref_set((*ref), name);
+    }
+
+    if(((*obj) = buffer_ref_getobject(*ref))){
+        return TRUE;
+    }else{
+        return FALSE;
+    }
 }
 
 void ec2_buffer_limits(t_ec2 *x){
+	//maybe at one point we should stop copying the buffer
+	//and just use the pointer ?
     x->buffer_size      = buffer_getframecount(x->buffer_obj)-1;
     x->channel_count    = buffer_getchannelcount(x->buffer_obj);
     
@@ -347,6 +358,10 @@ void ec2_buffer_limits(t_ec2 *x){
     }
     
     buffer_unlocksamples(x->buffer_obj);
+}
+
+void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+    defer_low(x, (method)ec2_doset, s, ac, av);
 }
 
 void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
@@ -377,10 +392,6 @@ void ec2_doset(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
         x->no_buffer = TRUE;
     }
     */
-}
-
-void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
-    defer_low(x, (method)ec2_doset, s, ac, av);
 }
 
 void ec2_dblclick(t_ec2 *x){

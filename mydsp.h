@@ -88,5 +88,17 @@ extern t_sample peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
      */
 }
 
+extern t_sample stereo_peek(t_sample *buf, t_atom_long buffer_size, t_sample index){
+    t_atom_long index_trunc = floor(index);
+    t_sample index_fract = (index - index_trunc);
+    t_atom_long index_trunc_2 = (index_trunc + 1);
+    t_bool index_ignore = ((index_trunc >= buffer_size) || (index_trunc < 0));
+    t_bool index_ignore_2 = ((index_trunc_2 >= buffer_size) || (index_trunc_2 < 0));
+
+    t_sample read_l = index_ignore ?0:buf[index_trunc];
+    t_sample read_2_l = index_ignore_2?0:buf[index_trunc_2];
+    t_sample readinterp_l = cosine_interp(index_fract, read_l, read_2_l);
+    return readinterp_l;
+}
 
 #endif /* mydsp_h */

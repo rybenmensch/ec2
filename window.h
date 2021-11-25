@@ -15,11 +15,11 @@ typedef struct _window{
 	t_buffer_ref *window_ext_ref;
 	t_buffer_obj *window_ext_obj;
 
-	t_sample (*window)(struct _window*, struct _ec2*, struct _voice*);
+	t_sample (*window)(struct _window*, struct _voice*);
 }t_window;
 
-t_sample window_internal(t_window *w, struct _ec2 *x, struct _voice *v);
-t_sample window_external(t_window *w, struct _ec2 *x, struct _voice *v);
+t_sample window_internal(t_window *w, struct _voice *v);
+t_sample window_external(t_window *w, struct _voice *v);
 
 void calculate_windows(t_window *window);
 

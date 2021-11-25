@@ -105,32 +105,22 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
         outlet_new((t_object *)x, "signal");
     }
 
-	/*
-    x->window_size = 512;
-    x->tukey = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
-    x->expodec = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
-    x->rexpodec = (t_sample *)sysmem_newptr(x->window_size*sizeof(t_sample));
-    calculate_windows(x);
-	*/
+	scanner_init(&x->scanner, 0.);
 	window_init(&x->window, 512);
-    x->window_ext_samps = NULL;
-    x->window_type = INTERNAL;
-    x->window_ext_ref = NULL;
-    x->window_ext_2_ref = NULL;
 
+	//voices_init(x, 64);
     x->total_voices = 64;
     x->active_voices = 0;
     x->voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
     for(int i=0;i<x->total_voices;i++){
-            x->voices[i].is_active = 0;
-            x->voices[i].play_phase = 0.;
-            x->voices[i].window_phase = 0.;
+		x->voices[i].is_active		= FALSE;
+		x->voices[i].is_done		= FALSE;
+		x->voices[i].play_phase		= 0.;
+		x->voices[i].window_phase	= 0.;
     }
 
-    x->scan_count = 0;
-    x->samplerate = 44100;
+    x->samplerate = sys_getsr();
 
-	scanner_init(&x->scanner, 0.);
 
 	x->glisson[0] = x->glisson_inv[0] = 0;
 	x->glisson[1] = x->glisson_inv[1] = 0;
@@ -150,21 +140,29 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     return (x);
 }
 
-t_sample window_ext(t_ec2 *x, t_voice *v){
-    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
-    //window determines the "life time" of a single grain!
-    t_sample window_phase = v->window_phase;
-    window_phase += v->window_increment;
-    v->window_phase = window_phase;
+t_sample glisson(t_ec2 *x, t_voice *v){
+	t_sample window_phase = v->window_phase / (x->window_size-1);
+	t_sample glisson_offset = (window_phase * x->glisson[0]) + x->glisson[1];
+	return glisson_offset;
+}
 
-    if(window_phase >= x->window_size){
-        v->is_active = FALSE;
-        x->active_voices--;
-        return 0;
-    }
+t_sample playback(t_ec2 *x, t_voice *v){
+    t_sample play_phase     = v->play_phase;
+    t_sample scan_begin     = v->scan_begin;
+    t_sample scan_end       = v->scan_end;
+    t_sample playback_rate  = v->playback_rate;
 
-    t_sample samp = peek(x->window_ext_samps, x->window_size, window_phase);
-    return samp;
+	//glissons are easy as fuck
+	playback_rate += glisson(x, v);
+    play_phase  += playback_rate;
+    play_phase  = fmod(play_phase, scan_end+1);
+    play_phase  = (play_phase<0.)?scan_end:play_phase;
+
+    v->play_phase = play_phase;
+
+    t_sample peek_point = fmod(play_phase+scan_begin, scan_end);
+    t_sample sample = peek(x->buffersamps, x->buffer_size, peek_point);
+    return sample;
 }
 
 t_sample window_direct(t_ec2 *x, t_voice *v){
@@ -213,7 +211,7 @@ t_sample window_direct(t_ec2 *x, t_voice *v){
     return interp;
 }
 
-t_sample window_internal(t_window *w, t_ec2 *x, t_voice *v){
+t_sample window_external(t_window *w, t_voice *v){
     //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
     //window determines the "life time" of a single grain!
     t_sample window_phase = v->window_phase;
@@ -222,7 +220,27 @@ t_sample window_internal(t_window *w, t_ec2 *x, t_voice *v){
 
     if(window_phase >= w->size){
         v->is_active = FALSE;
-        x->active_voices--;
+		v->is_done = TRUE;
+		//x->active_voices--;
+        return 0;
+    }
+
+    //t_sample samp = peek(w->window_ext_samps, w->size, window_phase);
+    //return samp;
+	return 0;
+}
+
+t_sample window_internal(t_window *w, t_voice *v){
+    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
+    //window determines the "life time" of a single grain!
+    t_sample window_phase = v->window_phase;
+    window_phase += v->window_increment;
+    v->window_phase = window_phase;
+
+    if(window_phase >= w->size){
+        v->is_active = FALSE;
+		v->is_done = TRUE;
+        //x->active_voices--;
         return 0;
     }
 
@@ -244,83 +262,7 @@ t_sample window_internal(t_window *w, t_ec2 *x, t_voice *v){
     return interp;
 }
 
-t_sample window_external(t_window *w, t_ec2 *x, t_voice *v){
-    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
-    //window determines the "life time" of a single grain!
-    t_sample window_phase = v->window_phase;
-    window_phase += v->window_increment;
-    v->window_phase = window_phase;
-
-    if(window_phase >= w->size){
-        v->is_active = FALSE;
-        x->active_voices--;
-        return 0;
-    }
-
-    //t_sample samp = peek(w->window_ext_samps, w->size, window_phase);
-    //return samp;
-	return 0;
-}
-
-t_sample window(t_ec2 *x, t_voice *v){
-    //side effects: increases window_phase, changes is_active (when done), active_voices is decreased
-    //window determines the "life time" of a single grain!
-    t_sample window_phase = v->window_phase;
-    window_phase += v->window_increment;
-    v->window_phase = window_phase;
-
-    if(window_phase >= x->window_size){
-        v->is_active = FALSE;
-        x->active_voices--;
-        return 0;
-    }
-
-    t_sample tuk        = peek(x->tukey, x->window_size, window_phase);
-    t_sample expo       = peek(x->expodec, x->window_size, window_phase);
-    t_sample rexpo      = peek(x->rexpodec, x->window_size, window_phase);
-    t_sample env_shape  = v->envelope_shape;
-
-    t_sample interp = 0;
-    if(env_shape<0.5){
-        interp = ((expo * (1-env_shape*2)) + (tuk * env_shape * 2));
-    }else if(env_shape==0.5){
-        interp = tuk;
-    }else if(env_shape<=1.){
-        interp = ((tuk * (1 - (env_shape - 0.5) * 2)) + (rexpo * (env_shape - 0.5) * 2));
-    }else{
-        interp = tuk;
-    }
-    return interp;
-}
-
-t_sample glisson(t_ec2 *x, t_voice *v){
-	t_sample window_phase = v->window_phase / (x->window_size-1);
-	t_sample glisson_offset = (window_phase * x->glisson[0]) + x->glisson[1];
-	return glisson_offset;
-}
-
-t_sample playback(t_ec2 *x, t_voice *v){
-    t_sample play_phase     = v->play_phase;
-    t_sample scan_begin     = v->scan_begin;
-    t_sample scan_end       = v->scan_end;
-    t_sample playback_rate  = v->playback_rate;
-
-	//glissons are easy as fuck
-	playback_rate += glisson(x, v);
-    play_phase  += playback_rate;
-    play_phase  = fmod(play_phase, scan_end+1);
-    play_phase  = (play_phase<0.)?scan_end:play_phase;
-
-    v->play_phase = play_phase;
-
-    t_sample peek_point = fmod(play_phase+scan_begin, scan_end);
-    t_sample sample = peek(x->buffersamps, x->buffer_size, peek_point);
-    return sample;
-}
-
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
-    t_atom_long total_voices = x->total_voices;
-
     t_sample *p_trig            = ins[0];
     t_sample *p_playback_rate   = ins[1];
     t_sample *p_scan_begin      = ins[2];
@@ -335,6 +277,7 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_sample *out_l             = outs[0];
     t_sample *out_r             = outs[1];
 
+    t_atom_long total_voices = x->total_voices;
     t_sample *numbers_out[total_voices];
     for(int i=0;i<total_voices;i++){
         numbers_out[i] 			= outs[i+2];
@@ -356,17 +299,13 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
          goto zero;
      }
 
-    t_atom_long n			= sampleframes;
-    t_atom_long buffer_size = x->buffer_size;
-    t_atom_long window_size = x->window_size;
-    t_float samplerate      = x->samplerate;
-
-	/*
-    t_sample (*window_ptr)(t_ec2 *x, t_voice *v);
-    window_ptr = (x->window_type)?window_ext:window;
-	 */
 	t_window *w = &x->window;
 	t_scanner *scp = &x->scanner;
+
+    t_atom_long n			= sampleframes;
+    t_atom_long buffer_size = x->buffer_size;
+    t_atom_long window_size = w->size;
+    t_float samplerate      = x->samplerate;
 
     while(n--){
         t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude, scan;
@@ -385,7 +324,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
 		scan			= *p_scan++;			scan			= (count[9])?scan:0.;
 		scp->scan(scp, scan, buffer_size);
 
-		//last grain to be over could return its index, to be used immediately
         if(trig>0. && amplitude!=0){
 			t_atom_long new_index = 0;
             if(x->active_voices < x->total_voices){
@@ -393,7 +331,8 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 for(int i=0;i<x->total_voices;i++){
                     if(x->voices[i].is_active == FALSE){
                         new_index = i;
-                        x->voices[i].is_active = TRUE;
+                        x->voices[i].is_active	= TRUE;
+						x->voices[i].is_done	= FALSE;
                         break;
                     }
                 }
@@ -414,33 +353,32 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
             }
         }
 
+		//SYNTHESIZE
         t_sample accum_l = 0;
         t_sample accum_r = 0;
-
         for(int i=0;i<x->total_voices;i++){
             if(x->voices[i].is_active == TRUE){
                 t_voice *v = &(x->voices[i]);
-                //t_sample windowsamp     = (*window_ptr)(x, v);
-				t_sample windowsamp = w->window(w, x, v);
+				t_sample windowsamp = w->window(w, v);
 				t_sample playbacksamp   = playback(x, v);
-
                 playbacksamp *= windowsamp;
                 playbacksamp *= x->voices[i].amplitude;
-                //normalization by total amount of voices
+				//normalization by total amount of voices
                 playbacksamp *= x->norm;
+
                 t_sample pan_l, pan_r;
                 cospan(playbacksamp, v->pan, &pan_l, &pan_r);
-                accum_l += pan_l;
+				accum_l += pan_l;
                 accum_r += pan_r;
+
+				x->active_voices -= v->is_done;
             }
+			//busymap
+			*numbers_out[i]++ = x->voices[i].is_active;
         }
 
         *out_l++ = FIX_DENORM_NAN_SAMPLE(accum_l);
         *out_r++ = FIX_DENORM_NAN_SAMPLE(accum_r);
-		//maybe remove this
-        for(int i=0;i<x->total_voices;i++){
-			*numbers_out[i]++ = x->voices[i].is_active;
-		}
 
 		*scan_out++ 		= scp->out;
 		*scan_begin_out++	= scp->begin_out;
