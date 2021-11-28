@@ -61,6 +61,9 @@ void ext_main(void *r){
 	class_addmethod(c, (method)ec2_norm,		"normalization", A_LONG, 0);
 	class_addmethod(c, (method)ec2_glisson,		"glisson", A_GIMME, 0);
 	class_addmethod(c, (method)ec2_glissonr,	"glissonr", A_GIMME, 0);
+	class_addmethod(c, (method)ec2_filt_type,	"filtertype", A_SYM, 0);
+	class_addmethod(c, (method)ec2_filt_glisson,"fglisson", A_GIMME, 0);
+	class_addmethod(c, (method)ec2_filt_q,		"filterq", A_FLOAT, 0);
 
 	class_dspinit(c);
 	class_register(CLASS_BOX, c);
@@ -76,6 +79,9 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
     x->count = (short*)sysmem_newptr(inlet_amount*sizeof(short));
 
     dsp_setup((t_pxobject * )x, inlet_amount);
+    samplerate = sys_getsr();
+	inv_samplerate = 1./samplerate;
+
     //scan outlets, voice active map (mc)
     for(int i=0;i<2;i++){
          outlet_new((t_object *)x, "multichannelsignal");
@@ -87,20 +93,9 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
 
 	scanner_init(&x->scanner, 0.);
 	window_init(&x->window, 512);
+	voices_init(x, 64);
 
-	//voices_init(x, 64);
-    x->total_voices = 64;
-    x->active_voices = 0;
-    x->voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
-    for(int i=0;i<x->total_voices;i++){
-		x->voices[i].is_active		= FALSE;
-		x->voices[i].is_done		= FALSE;
-		x->voices[i].play_phase		= 0.;
-		x->voices[i].window_phase	= 0.;
-    }
-
-    x->samplerate = sys_getsr();
-
+	x->filter_type = BYPASS;
 
 	x->glisson[0] = x->glisson_inv[0] = 0;
 	x->glisson[1] = x->glisson_inv[1] = 0;
@@ -118,6 +113,19 @@ void *ec2_new(t_symbol *s, long argc, t_atom *argv){
 	srand((uint)time(NULL));
 
     return (x);
+}
+
+void voices_init(t_ec2* x, t_atom_long size){
+    x->total_voices = 64;
+    x->active_voices = 0;
+    x->voices = (t_voice *)sysmem_newptr(x->total_voices * sizeof(t_voice));
+    for(int i=0;i<x->total_voices;i++){
+		x->voices[i].is_active		= FALSE;
+		x->voices[i].is_done		= FALSE;
+		x->voices[i].play_phase		= 0.;
+		x->voices[i].window_phase	= 0.;
+		svf_init(&x->voices[i].filter, 1000, 0.5, x->filter_type, inv_samplerate);
+    }
 }
 
 t_sample glisson(t_ec2 *x, t_voice *v){
@@ -239,6 +247,15 @@ t_sample window_internal(t_window *w, t_voice *v){
     return interp;
 }
 
+t_sample filter_process(t_ec2 *x, t_voice *v, t_sample in){
+	//NOT RIGHT YET
+	t_sample window_phase = v->window_phase / (x->window.size-1);
+	t_sample oct = (window_phase * x->filter_params.m) + x->filter_params.b;
+	t_sample freq = oct * x->filter_params.center;
+	svf_set_frequency(&v->filter, freq);
+	return svf_process(&v->filter, in);
+}
+
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam){
     t_sample *p_trig            = ins[0];
     t_sample *p_playback_rate   = ins[1];
@@ -283,7 +300,6 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
     t_atom_long n			= sampleframes;
     t_atom_long buffer_size = x->buffer_size;
     t_atom_long window_size = w->size;
-    t_float samplerate      = x->samplerate;
 
     while(n--){
         t_sample trig, playback_rate, scan_begin, scan_range, scan_speed, grain_duration, envelope_shape, pan, amplitude, scan;
@@ -328,6 +344,10 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
                 x->voices[new_index].window_increment  = window_increment;
                 x->voices[new_index].window_phase      = 0;
                 x->voices[new_index].play_phase        = scp->position;
+				t_svf* svf = &x->voices[new_index].filter;
+				svf_reset(svf, inv_samplerate);
+				svf_set_type(svf, x->filter_type);
+				svf_set_q(svf, x->filter_params.q);
             }
         }
 
@@ -340,6 +360,9 @@ void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double 
 				t_sample windowsamp = w->window(w, v);
 				t_sample playbacksamp   = playback(x, v);
                 playbacksamp *= windowsamp;
+
+				//playbacksamp = filter_process(x, v, playbacksamp);
+
                 playbacksamp *= x->voices[i].amplitude;
 				//normalization by total amount of voices
                 playbacksamp *= x->norm;
@@ -372,8 +395,14 @@ zero:
     }
 }
 
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags){
-	x->samplerate = samplerate;
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double sr, long maxvectorsize, long flags){
+	if(sr != samplerate){
+		samplerate = sr;
+		inv_samplerate = 1./samplerate;
+		for(int i=0;i<x->total_voices;i++){
+			svf_reset(&x->voices[i].filter, inv_samplerate);
+		}
+	}
 	sysmem_copyptr(count, x->count, inlet_amount*sizeof(short));
 
 	if(!count[inlet_amount-1]){
@@ -388,6 +417,7 @@ void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long 
 void ec2_free(t_ec2 *x){
     dsp_free((t_pxobject *)x);
     object_free(x->buffer_reference);
+	window_free(&x->window);
 
     if(x->buffersamps){
         sysmem_freeptr(x->buffersamps);
@@ -401,5 +431,4 @@ void ec2_free(t_ec2 *x){
         sysmem_freeptr(x->count);
     }
 
-	window_free(&x->window);
 }

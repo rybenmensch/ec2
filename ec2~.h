@@ -38,6 +38,7 @@ typedef struct _voice{
     t_sample amplitude;    
     t_sample scan_begin;
     t_sample scan_end;
+	t_svf    filter;
 	//t_sample glisson[2];
 }t_voice;
 
@@ -52,7 +53,8 @@ typedef struct _ec2_buffer{
 
 typedef struct _ec2 {
     t_pxobject p_ob;
-    t_float samplerate;
+    //t_float samplerate;
+	//t_float inv_samplerate;
     t_buffer_ref *buffer_reference;
     t_buffer_obj *buffer_obj;
     t_atom_long buffer_size;    //should this be the exact size or one less?
@@ -60,23 +62,19 @@ typedef struct _ec2 {
     t_atom_long channel_count;
     t_bool buffer_modified;
     t_bool no_buffer;
-    
-    //t_sample *tukey;
-    //t_sample *expodec;
-    //t_sample *rexpodec;
-    //t_atom_long window_size;
-    //int window_type;
-	t_window window;
 
+	t_window window;
 	t_scanner scanner;
 
 	t_atom_long total_voices;
     t_atom_long active_voices;
     t_voice *voices;
-    
-    t_bool init;
-    t_sample scan_count;
-    
+
+	enum svf_type filter_type;
+	t_svf_gliss filter_params;
+	//t_sample filter_gliss[2];
+    //t_bool init;
+    //t_sample scan_count;
     t_sample norm;
 
 	t_sample glisson[2];
@@ -90,10 +88,13 @@ t_symbol *ps_buffer_modified;
 t_class *ec2_class;
 
 t_atom_long inlet_amount;
+t_sample samplerate;
+t_sample inv_samplerate;
 
 void *ec2_new(t_symbol *s,  long argc, t_atom *argv);
 void ec2_free(t_ec2 *x);
 void ec2_assist(t_ec2 *x, void *b, long m, long a, char *s);
+void voices_init(t_ec2* x, t_atom_long size);
 void ec2_norm(t_ec2 *x, t_atom_long a);
 void ec2_glisson(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
 void ec2_glissonr(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
@@ -111,7 +112,8 @@ void ec2_set(t_ec2 *x, t_symbol *s, long ac, t_atom *av);
 void ec2_dblclick(t_ec2 *x);
 t_max_err ec2_notify(t_ec2 *x, t_symbol *s, t_symbol *msg, void *sender, void *data);
 void ec2_perform64(t_ec2 *x, t_object *dsp64, double **ins, long numins, double **outs, long numouts, long sampleframes, long flags, void *userparam);
-void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double samplerate, long maxvectorsize, long flags);
+void ec2_dsp64(t_ec2 *x, t_object *dsp64, short *count, double sr, long maxvectorsize, long flags);
+
 void ec2_norm(t_ec2 *x, t_atom_long a){
     a = CLAMP(a, 0, 1);
     x->norm = (a)?(t_sample)1./x->total_voices:1;
@@ -181,6 +183,63 @@ void ec2_window_type(t_ec2 *x, t_symbol *s){
         }
 		w->window = window_external;
     }
+}
+
+void ec2_filt_type(t_ec2 *x, t_symbol *s){
+	if(s==gensym("bypass")){
+		x->filter_type = BYPASS;
+	}else if(s==gensym("lowpass")){
+		x->filter_type = LOWPASS;
+    }else if(s==gensym("highpass")){
+		x->filter_type = HIGHPASS;
+    }else if(s==gensym("bandpass")){
+		x->filter_type = BANDPASS;
+    }else if(s==gensym("notch")){
+		x->filter_type = NOTCH;
+    }
+}
+
+void ec2_filt_q(t_ec2 *x, double q){
+	x->filter_params.q = q;
+}
+
+void ec2_filt_glisson(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
+	//structure of message: glisson startoffset endoffset (in semitones)
+    if(ac!=2){
+        object_error((t_object *)x, "Wrong arguments to fglisson");
+        object_error((t_object *)x, "Correct format is: fglisson (float)center frequency (float)octave");
+        return;
+    }
+	t_sample gl[2];
+	for(int i=0;i<2;i++){
+		if(atom_gettype(av+i) == A_FLOAT){
+			gl[i] = (t_sample)atom_getfloat(av+i);
+		}else if(atom_gettype(av+i) == A_LONG){
+			gl[i] = (t_sample)atom_getlong(av+i);
+		}
+	}
+
+	x->filter_params.center = gl[0];
+	t_sample octave = gl[1];
+
+
+	t_sample x1, x2;
+	if(octave>=0){
+		x1 = pow(2, octave);
+		x2 = 1./x1;
+
+	}else{
+		//swap
+		octave *= -1;
+		x2 = pow(2, octave);
+		x1 = 1./x2;
+	}
+
+	//lineare funktion
+	t_sample b = x1;
+	t_sample m = x2 - b;
+	x->filter_params.m = m;
+	x->filter_params.b = b;
 }
 
 void ec2_window_ext(t_ec2 *x, t_symbol *s, long ac, t_atom *av){
